@@ -1,3 +1,4 @@
+// backend/src/models/student.model.js
 import mongoose from 'mongoose';
 
 const StudentSchema = new mongoose.Schema({
@@ -20,11 +21,22 @@ const StudentSchema = new mongoose.Schema({
     required: true, 
     unique: true 
   },
+  className: { 
+    type: String, 
+    required: true 
+  },
+  role: {
+    type: String,
+    default: 'parent' 
+  },
   profilePic: {
     type: String,
     default: null
   },
-  className: { type: String, required: true }
+  stats: {
+    // attendance: { type: Number, default: 0 },
+    avgScore: { type: Number, default: 0 }
+  }
 }, { timestamps: true });
 
 export default mongoose.model('Student', StudentSchema);

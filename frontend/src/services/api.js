@@ -1,12 +1,7 @@
 import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// Replace with your backend URL
-// For local development:
-// - Physical device: use your computer's IP address
-// - Android emulator: http://10.0.2.2:5000
-// - iOS simulator: http://localhost:5000
-const API_URL = 'https://b56233dfc272.ngrok-free.app/api';
-
+const API_URL = 'https://8989dccd1c14.ngrok-free.app/api';
 
 const api = axios.create({
   baseURL: API_URL,
@@ -14,6 +9,22 @@ const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+});
+
+// ADD THIS INTERCEPTOR SECTION
+api.interceptors.request.use(async (config) => {
+  try {
+    const token = await AsyncStorage.getItem('token');
+    if (token) {
+      // This attaches the "identity badge" the backend is looking for
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+  } catch (error) {
+    console.error("Error fetching token from storage:", error);
+  }
+  return config;
+}, (error) => {
+  return Promise.reject(error);
 });
 
 export default api;

@@ -1,3 +1,4 @@
+// backend/src/models/teacher.model.js
 import mongoose from 'mongoose';
 
 const TeacherSchema = new mongoose.Schema({
@@ -21,11 +22,21 @@ const TeacherSchema = new mongoose.Schema({
     required: true, 
     unique: true 
   },
+  role: {
+    type: String,
+    default: 'teacher'
+  },
+  classTeachership: { 
+    type: String 
+  },
+  assignments: [{
+    class: { type: String },
+    subject: { type: String }
+  }],
   profilePic: {
     type: String,
     default: null
-  },
-  subject: { type: String } 
+  }
 }, { timestamps: true });
 
 export default mongoose.model('Teacher', TeacherSchema);
