@@ -11,18 +11,20 @@ import {
   Animated,
   BackHandler,
   Dimensions,
-  KeyboardAvoidingView
+  KeyboardAvoidingView,
+  Alert // Added Alert for feedback
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import FontAwesome5 from "react-native-vector-icons/FontAwesome5";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import api from "../../services/api"; // Integrated API service
 
 const { width } = Dimensions.get('window');
 const SIDEBAR_WIDTH = 280;
 
 /**
  * AddUserScreen Component
- * Finalized version for Android with typeable class/subject assignments.
+ * Updated to handle auto-generated passwords and API integration.
  */
 export default function AddUserScreen({ navigation }) {
   const [activeRole, setActiveRole] = useState("teacher"); 
@@ -36,22 +38,19 @@ export default function AddUserScreen({ navigation }) {
   const [teacherName, setTeacherName] = useState("");
   const [teacherMobile, setTeacherMobile] = useState("");
   const [teacherClassTeachership, setTeacherClassTeachership] = useState("");
-  const [teacherPassword, setTeacherPassword] = useState("");
+  // teacherPassword state removed as it's now backend-generated
   
-  // Teaching Assignment Logic (Linked Class & Subject as typing inputs)
+  // Teaching Assignment Logic
   const [tempClass, setTempClass] = useState("");
   const [tempSubject, setTempSubject] = useState("");
-  const [teachingAssignments, setTeachingAssignments] = useState([
-    { class: "9-A", subject: "Math" },
-    { class: "10-B", subject: "Physics" }
-  ]);
+  const [teachingAssignments, setTeachingAssignments] = useState([]);
 
   // Form States - Student
   const [studentName, setStudentName] = useState("");
   const [parentMobile, setParentMobile] = useState("");
   const [studentClass, setStudentClass] = useState("");
   const [studentRoll, setStudentRoll] = useState("");
-  const [studentPassword, setStudentPassword] = useState("");
+  // studentPassword state removed as it's now backend-generated
 
   // Handle Android Back Button to close sidebar first
   useEffect(() => {
@@ -99,6 +98,54 @@ export default function AddUserScreen({ navigation }) {
 
   const removeAssignment = (index) => {
     setTeachingAssignments(teachingAssignments.filter((_, i) => i !== index));
+  };
+
+  // API Integration Logic
+  const handleOnboard = async () => {
+    // Basic Validation
+    if (activeRole === 'teacher' && (!teacherName || !teacherMobile)) {
+      return Alert.alert("Error", "Name and Mobile are required");
+    }
+    if (activeRole === 'student' && (!studentName || !parentMobile || !studentRoll || !studentClass)) {
+      return Alert.alert("Error", "All student fields are required");
+    }
+
+    try {
+      const payload = activeRole === 'teacher' ? {
+        role: 'teacher',
+        name: teacherName,
+        mobile: teacherMobile,
+        classTeachership: teacherClassTeachership,
+        assignments: teachingAssignments,
+      } : {
+        role: 'student',
+        name: studentName,
+        mobile: parentMobile,
+        className: studentClass,
+        rollNo: studentRoll,
+      };
+
+      const response = await api.post('/admin/onboard', payload);
+
+      // Show success with the generated password
+      Alert.alert(
+        "Success",
+        `User registered successfully!\n\nDefault Password: ${response.data.generatedPassword}`,
+        [{ 
+          text: "OK", 
+          onPress: () => {
+            // Clear forms after success
+            if (activeRole === 'teacher') {
+               setTeacherName(""); setTeacherMobile(""); setTeacherClassTeachership(""); setTeachingAssignments([]);
+            } else {
+               setStudentName(""); setParentMobile(""); setStudentClass(""); setStudentRoll("");
+            }
+          }
+        }]
+      );
+    } catch (error) {
+      Alert.alert("Error", error.response?.data?.message || "Failed to connect to server");
+    }
   };
 
   const handleLogout = async () => {
@@ -240,7 +287,7 @@ export default function AddUserScreen({ navigation }) {
                     />
                   </View>
 
-                  {/* Class Teachership (Now a standard typing input) */}
+                  {/* Class Teachership */}
                   <View style={styles.cardInput}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
                       <FontAwesome5 name="star" size={10} color="#818cf8" />
@@ -256,7 +303,7 @@ export default function AddUserScreen({ navigation }) {
                     <Text style={styles.helperText}>This class will appear on their main dashboard.</Text>
                   </View>
 
-                  {/* Teaching Assignments (Linked Class & Subject with Typing) */}
+                  {/* Teaching Assignments */}
                   <View style={styles.inputGroup}>
                     <Text style={styles.label}>TEACHING ASSIGNMENTS</Text>
                     <View style={styles.assignmentEntryRow}>
@@ -291,28 +338,18 @@ export default function AddUserScreen({ navigation }) {
                     </View>
                   </View>
 
+                  {/* Teacher Code (Read-Only) */}
                   <View style={styles.row}>
                     <View style={[styles.inputGroup, { flex: 1 }]}>
                       <Text style={styles.label}>TEACHER CODE</Text>
                       <View style={styles.readOnlyInput}>
-                        <Text style={styles.readOnlyText}>T-2025-08</Text>
-                        <FontAwesome5 name="lock" size={10} color="#94a3b8" />
+                        <Text style={styles.readOnlyText}>AUTO-GENERATED</Text>
+                        <FontAwesome5 name="magic" size={10} color="#94a3b8" />
                       </View>
-                    </View>
-                    <View style={[styles.inputGroup, { flex: 1 }]}>
-                      <Text style={styles.label}>SET PASSWORD</Text>
-                      <TextInput 
-                        style={styles.input} 
-                        placeholder="Password" 
-                        placeholderTextColor="#cbd5e1"
-                        secureTextEntry
-                        value={teacherPassword}
-                        onChangeText={setTeacherPassword}
-                      />
                     </View>
                   </View>
 
-                  <TouchableOpacity style={styles.primaryBtn}>
+                  <TouchableOpacity style={styles.primaryBtn} onPress={handleOnboard}>
                     <Text style={styles.primaryBtnText}>Create Teacher</Text>
                   </TouchableOpacity>
                 </View>
@@ -347,7 +384,7 @@ export default function AddUserScreen({ navigation }) {
                     </View>
                   </View>
 
-                  {/* Assign Class (TextInput) & Roll No */}
+                  {/* Assign Class & Roll No */}
                   <View style={styles.row}>
                     <View style={[styles.inputGroup, { flex: 2 }]}>
                       <Text style={styles.label}>ASSIGN CLASS</Text>
@@ -382,22 +419,11 @@ export default function AddUserScreen({ navigation }) {
                       </View>
                     </View>
                     <View style={{ marginTop: 12 }}>
-                      <Text style={styles.label}>SET PERMANENT PASSWORD</Text>
-                      <View style={styles.iconInputContainerWhite}>
-                        <FontAwesome5 name="key" size={12} color="#94a3b8" style={{ marginLeft: 12 }} />
-                        <TextInput 
-                          style={styles.iconInput} 
-                          placeholder="Create password" 
-                          placeholderTextColor="#cbd5e1"
-                          secureTextEntry
-                          value={studentPassword}
-                          onChangeText={setStudentPassword}
-                        />
-                      </View>
+                       <Text style={styles.helperText}>Password will be generated as: FIRST 4 LETTERS + LAST 2 DIGITS OF MOBILE</Text>
                     </View>
                   </View>
 
-                  <TouchableOpacity style={styles.primaryBtn}>
+                  <TouchableOpacity style={styles.primaryBtn} onPress={handleOnboard}>
                     <Text style={styles.primaryBtnText}>Add Student</Text>
                   </TouchableOpacity>
 
