@@ -415,7 +415,7 @@ export default function AddUserScreen({ navigation }) {
                       <View style={styles.credentialIconBox}><FontAwesome5 name="id-card" size={14} color="#94a3b8" /></View>
                       <View>
                         <Text style={styles.credentialLabel}>LOGIN ID</Text>
-                        <Text style={styles.credentialValue}>Mobile Number <Text style={{ fontWeight: '400', color: '#94a3b8' }}>OR</Text> Roll No</Text>
+                        <Text style={styles.credentialValue}>Mobile Number</Text>
                       </View>
                     </View>
                     <View style={{ marginTop: 12 }}>
@@ -427,10 +427,10 @@ export default function AddUserScreen({ navigation }) {
                     <Text style={styles.primaryBtnText}>Add Student</Text>
                   </TouchableOpacity>
 
-                  <TouchableOpacity style={styles.bulkLink}>
+                  {/* <TouchableOpacity style={styles.bulkLink}>
                     <FontAwesome5 name="layer-group" size={12} color="#4f46e5" />
                     <Text style={styles.bulkLinkText}>Bulk Upload Students?</Text>
-                  </TouchableOpacity>
+                  </TouchableOpacity> */}
                 </View>
               )}
 

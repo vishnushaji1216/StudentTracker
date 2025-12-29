@@ -50,10 +50,11 @@ export const loginUser = async (req, res) => {
       if (isMobile(input)) {
         inputField = "mobile";
         user = await Student.findOne({ mobile: input });
-      } else {
-        inputField = "rollNo";
-        user = await Student.findOne({ rollNo: input });
       }
+      // } else {
+      //   inputField = "rollNo";
+      //   user = await Student.findOne({ rollNo: input });
+      // }
     }
 
     // No user found
