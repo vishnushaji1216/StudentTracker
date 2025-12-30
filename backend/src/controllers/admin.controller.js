@@ -67,3 +67,87 @@ export const onboardUser = async (req, res) => {
     res.status(500).json({ message: "Server error", error: err.message });
   }
 };
+
+export const getTeacherRegistry = async (req, res) => {
+  try {
+    const { search } = req.query;
+    let query = {};
+
+    if (search) {
+      query = {
+        $or: [
+          { name: { $regex: search, $options: "i" } },
+          { teacherCode: { $regex: search, $options: "i" } }
+        ]
+      };
+    }
+
+    const teachers = await Teacher.find(query);
+
+    const formattedTeachers = teachers.map(t => {
+      // Logic to find Main Subject (the one that appears most in assignments)
+      const subjectCounts = {};
+      t.assignments.forEach(a => {
+        subjectCounts[a.subject] = (subjectCounts[a.subject] || 0) + 1;
+      });
+      const mainSubject = Object.keys(subjectCounts).reduce((a, b) => 
+        subjectCounts[a] > subjectCounts[b] ? a : b, "N/A"
+      );
+
+      return {
+        _id: t._id,
+        name: t.name,
+        teacherCode: t.teacherCode,
+        profilePic: t.profilePic,
+        roleDisplay: t.classTeachership ? `CLASS TEACHER: ${t.classTeachership}` : "SUBJECT TEACHER",
+        mainSubject: mainSubject,
+        avgPerformance: "82%", // Dummy value until Marks model is linked
+        isClassTeacher: !!t.classTeachership
+      };
+    });
+
+    res.status(200).json(formattedTeachers);
+  } catch (err) {
+    res.status(500).json({ message: "Error fetching teachers", error: err.message });
+  }
+};
+
+export const getStudentRegistry = async (req, res) => {
+  try {
+    const { className, search } = req.query;
+    let query = {};
+
+    // Only fetch if a class is selected (as per your requirement)
+    if (className) {
+      query.className = className;
+    }
+
+    if (search) {
+      query.$or = [
+        { name: { $regex: search, $options: "i" } },
+        { rollNo: { $regex: search, $options: "i" } }
+      ];
+    }
+
+    // If no class selected and no search, we return empty list or specific message
+    if (!className && !search) {
+      return res.status(200).json([]);
+    }
+
+    const students = await Student.find(query);
+
+    const formattedStudents = students.map(s => ({
+      _id: s._id,
+      name: s.name,
+      rollNo: s.rollNo,
+      parentMobile: s.mobile,
+      profilePic: s.profilePic,
+      performance: "75%", // Dummy value
+      className: s.className
+    }));
+
+    res.status(200).json(formattedStudents);
+  } catch (err) {
+    res.status(500).json({ message: "Error fetching students", error: err.message });
+  }
+};

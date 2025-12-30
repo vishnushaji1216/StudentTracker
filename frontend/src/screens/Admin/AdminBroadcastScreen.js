@@ -160,20 +160,9 @@ export default function AdminBroadcastScreen({ navigation }) {
               
               <SidebarItem icon="bullhorn" label="Broadcast" active onPress={() => {toggleSidebar();navigation.navigate('Broadcast');}}/>
               
-              <SidebarItem 
-                icon="graduation-cap" 
-                label="Promotion Tool" 
-                onPress={() => {toggleSidebar(); navigation.navigate('PromotionTool');}}
-              />
+              <SidebarItem icon="graduation-cap" label="Promotion Tool" onPress={() => {toggleSidebar(); navigation.navigate('PromotionTool');}}/>
               
-              <SidebarItem 
-                icon="shield-alt" 
-                label="Settings" 
-                onPress={() => {
-                  toggleSidebar();
-                  navigation.navigate('AdminSetting');
-                }}
-              />
+              <SidebarItem icon="shield-alt" label="Settings" onPress={() => {toggleSidebar();navigation.navigate('AdminSetting');}}/>
             </View>
           </View>
 

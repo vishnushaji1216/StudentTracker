@@ -1,5 +1,5 @@
 import express from "express";
-import { onboardUser } from "../controllers/admin.controller.js";
+import { onboardUser, getTeacherRegistry, getStudentRegistry } from "../controllers/admin.controller.js";
 import auth from "../middleware/auth.middleware.js";
 
 const router = express.Router();
@@ -16,5 +16,8 @@ router.post("/onboard", auth, (req, res, next) => {
     }
     next();
 }, onboardUser);
+
+router.get("/teachers", auth, getTeacherRegistry);
+router.get("/students", auth, getStudentRegistry);
 
 export default router;

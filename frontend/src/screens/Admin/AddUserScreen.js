@@ -194,6 +194,8 @@ export default function AddUserScreen({ navigation }) {
               <SidebarItem icon="list-ul" label="Teacher Registry" onPress={() => { toggleSidebar(); navigation?.navigate('TeacherRegistry'); }} />
               <SidebarItem icon="list-ul" label="Student Registry" onPress={() => { toggleSidebar(); navigation?.navigate('StudentRegistry'); }} />
               <SidebarItem icon="bullhorn" label="Broadcast" onPress={() => { toggleSidebar(); navigation?.navigate('Broadcast'); }}/>
+              <SidebarItem icon="graduation-cap" label="Promotion Tool" onPress={() => {toggleSidebar(); navigation.navigate('PromotionTool');}}/>
+              <SidebarItem icon="shield-alt" label="Settings" onPress={() => {toggleSidebar();navigation.navigate('AdminSetting');}}/>
             </View>
           </View>
 
