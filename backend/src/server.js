@@ -3,7 +3,8 @@ import dotenv from "dotenv";
 import cors from "cors";
 import connectDB from "./config/db.js"; 
 import authRoutes from "./routes/auth.routes.js";
-import adminRoutes from "./routes/admin.routes.js"; // Import the new routes
+import adminRoutes from "./routes/admin.routes.js"; 
+import teacherRoutes from "./routes/teacher.routes.js"
 
 dotenv.config();
 connectDB();
@@ -14,7 +15,8 @@ app.use(express.json());
 
 // Register Routes
 app.use("/api/auth", authRoutes);
-app.use("/api/admin", adminRoutes); // Connect admin routes to /api/admin
+app.use("/api/admin", adminRoutes); 
+app.use("/api/teacher", teacherRoutes);
 
 app.get("/", (req, res) => {
   res.send("Backend running...");
