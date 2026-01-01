@@ -9,47 +9,93 @@ import {
   StatusBar,
   Platform,
   Animated,
-  BackHandler
+  BackHandler,
+  Alert,
+  ActivityIndicator
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import FontAwesome5 from "react-native-vector-icons/FontAwesome5";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import api from "../../services/api";
 
 const SIDEBAR_WIDTH = 280;
 
-// Mock History Data
-const HISTORY_DATA = [
-  {
-    id: '1',
-    to: 'Everyone',
-    date: 'Today, 10:00 AM',
-    title: 'Server Maintenance',
-    preview: 'The app will be down for 1 hour tonight for upgrades...',
-    isUrgent: false,
-  },
-  {
-    id: '2',
-    to: 'Parents',
-    date: 'Yesterday',
-    title: 'Heavy Rain Alert',
-    preview: 'School will remain closed tomorrow due to heavy rainfall...',
-    isUrgent: true,
-  },
-];
-
 export default function AdminBroadcastScreen({ navigation }) {
-  // Sidebar State
+  // --- SIDEBAR STATE ---
   const slideAnim = useRef(new Animated.Value(-SIDEBAR_WIDTH)).current;
   const overlayAnim = useRef(new Animated.Value(0)).current;
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
-  // Form State
-  const [target, setTarget] = useState('Everyone'); // Everyone, Teachers, Parents
+  // --- FORM STATE ---
+  const [target, setTarget] = useState('Everyone'); // Options: 'Everyone', 'Teachers', 'Parents'
   const [subject, setSubject] = useState('');
   const [message, setMessage] = useState('');
   const [isUrgent, setIsUrgent] = useState(false);
 
-  // Handle Android Back Button
+  // --- DATA STATE ---
+  const [historyData, setHistoryData] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [sending, setSending] = useState(false);
+
+  // --- 1. FETCH HISTORY ON MOUNT ---
+  useEffect(() => {
+    fetchHistory();
+  }, []);
+
+  const fetchHistory = async () => {
+    setLoading(true);
+    try {
+      const response = await api.get('/admin/broadcast-history');
+      setHistoryData(response.data);
+    } catch (error) {
+      console.error("Fetch History Error:", error);
+      // Optional: Alert.alert("Error", "Could not load history.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // --- 2. SEND BROADCAST ---
+  const handleSendBroadcast = async () => {
+    if (!subject.trim() || !message.trim()) {
+      Alert.alert("Error", "Please enter both subject and message.");
+      return;
+    }
+
+    setSending(true);
+    try {
+      const payload = {
+        target: target, // Mapped to 'targetAudience' in backend
+        subject: subject, // Mapped to 'title' in backend
+        message: message,
+        isUrgent: isUrgent
+      };
+
+      await api.post('/admin/broadcast', payload);
+
+      Alert.alert("Success", "Broadcast sent successfully!", [
+        {
+          text: "OK",
+          onPress: () => {
+            // Reset Form
+            setSubject("");
+            setMessage("");
+            setIsUrgent(false);
+            setTarget("Everyone");
+            // Refresh List
+            fetchHistory();
+          }
+        }
+      ]);
+    } catch (error) {
+      console.error(error);
+      Alert.alert("Error", error.response?.data?.message || "Failed to send broadcast");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  // --- SIDEBAR & NAV LOGIC ---
   useEffect(() => {
     const backHandler = BackHandler.addEventListener(
       "hardwareBackPress",
@@ -130,38 +176,23 @@ export default function AdminBroadcastScreen({ navigation }) {
                 label="Dashboard" 
                 onPress={() => { toggleSidebar(); navigation.navigate('AdminDash'); }}
               />
-
               <SidebarItem 
                 icon="user-plus" 
                 label="Add User" 
-                onPress={() => {
-                  toggleSidebar(); 
-                  navigation.navigate('AddUser');
-                }}
+                onPress={() => { toggleSidebar(); navigation.navigate('AddUser'); }}
               />
-              
               <SidebarItem 
                 icon="list-ul" 
                 label="Teacher Registry" 
-                onPress={() => {
-                  toggleSidebar();
-                  navigation.navigate('TeacherRegistry');
-                }}
+                onPress={() => { toggleSidebar(); navigation.navigate('TeacherRegistry'); }}
               />
-              
               <SidebarItem 
                 icon="list-ul" 
                 label="Student Registry" 
-                onPress={() => {
-                  toggleSidebar();
-                  navigation.navigate('StudentRegistry');
-                }}
+                onPress={() => { toggleSidebar(); navigation.navigate('StudentRegistry'); }}
               />
-              
-              <SidebarItem icon="bullhorn" label="Broadcast" active onPress={() => {toggleSidebar();navigation.navigate('Broadcast');}}/>
-              
+              <SidebarItem icon="bullhorn" label="Broadcast" active />
               <SidebarItem icon="graduation-cap" label="Promotion Tool" onPress={() => {toggleSidebar(); navigation.navigate('PromotionTool');}}/>
-              
               <SidebarItem icon="shield-alt" label="Settings" onPress={() => {toggleSidebar();navigation.navigate('AdminSetting');}}/>
             </View>
           </View>
@@ -258,39 +289,61 @@ export default function AdminBroadcastScreen({ navigation }) {
               </TouchableOpacity>
 
               {/* Send Button */}
-              <TouchableOpacity style={styles.sendBtn}>
-                <FontAwesome5 name="paper-plane" size={14} color="#fff" />
-                <Text style={styles.sendBtnText}>Send Broadcast</Text>
+              <TouchableOpacity 
+                style={[styles.sendBtn, sending && { opacity: 0.7 }]} 
+                onPress={handleSendBroadcast}
+                disabled={sending}
+              >
+                {sending ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <>
+                    <FontAwesome5 name="paper-plane" size={14} color="#fff" />
+                    <Text style={styles.sendBtnText}>Send Broadcast</Text>
+                  </>
+                )}
               </TouchableOpacity>
             </View>
 
-            {/* 2. History Section */}
+            {/* 2. History Section - CONNECTED TO API */}
             <Text style={[styles.sectionTitle, { marginTop: 8, marginBottom: 12 }]}>RECENT HISTORY</Text>
             
-            {HISTORY_DATA.map((item) => (
-              <View 
-                key={item.id} 
-                style={[styles.historyCard, item.isUrgent && styles.historyCardUrgent]}
-              >
-                <View style={styles.historyHeader}>
-                  <View style={[styles.tag, item.isUrgent ? styles.tagUrgent : styles.tagNormal]}>
-                    <Text style={[styles.tagText, item.isUrgent ? styles.tagTextUrgent : styles.tagTextNormal]}>
-                      To: {item.to}
+            {loading ? (
+              <ActivityIndicator size="large" color="#4f46e5" style={{ marginTop: 20 }} />
+            ) : historyData.length === 0 ? (
+              <Text style={{ textAlign: 'center', color: '#94a3b8', marginTop: 10 }}>No announcements sent yet.</Text>
+            ) : (
+              historyData.map((item) => (
+                <View 
+                  key={item._id || item.id} 
+                  style={[styles.historyCard, item.isUrgent && styles.historyCardUrgent]}
+                >
+                  <View style={styles.historyHeader}>
+                    <View style={[styles.tag, item.isUrgent ? styles.tagUrgent : styles.tagNormal]}>
+                      <Text style={[styles.tagText, item.isUrgent ? styles.tagTextUrgent : styles.tagTextNormal]}>
+                        To: {item.targetAudience || item.to}
+                      </Text>
+                    </View>
+                    <Text style={[styles.dateText, item.isUrgent && { color: '#f87171' }]}>
+                      {new Date(item.createdAt || item.date).toLocaleDateString()}
                     </Text>
                   </View>
-                  <Text style={[styles.dateText, item.isUrgent && { color: '#f87171' }]}>{item.date}</Text>
+                  
+                  <View style={styles.historyTitleRow}>
+                    {item.isUrgent && (
+                      <FontAwesome5 name="exclamation-circle" size={14} color="#b91c1c" style={{ marginRight: 6 }} />
+                    )}
+                    <Text style={[styles.historyTitle, item.isUrgent && { color: '#991b1b' }]}>
+                      {item.title}
+                    </Text>
+                  </View>
+                  
+                  <Text style={[styles.historyPreview, item.isUrgent && { color: '#dc2626' }]} numberOfLines={2}>
+                    {item.message || item.preview}
+                  </Text>
                 </View>
-                
-                <View style={styles.historyTitleRow}>
-                  {item.isUrgent && <FontAwesome5 name="exclamation-circle" size={14} color="#b91c1c" style={{ marginRight: 6 }} />}
-                  <Text style={[styles.historyTitle, item.isUrgent && { color: '#991b1b' }]}>{item.title}</Text>
-                </View>
-                
-                <Text style={[styles.historyPreview, item.isUrgent && { color: '#dc2626' }]} numberOfLines={1}>
-                  {item.preview}
-                </Text>
-              </View>
-            ))}
+              ))
+            )}
 
           </View>
         </ScrollView>

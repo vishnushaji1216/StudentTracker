@@ -1,5 +1,6 @@
 import Teacher from "../models/teacher.model.js";
 import Student from "../models/student.model.js";
+import Announcement from "../models/announcement.model.js";
 import bcrypt from "bcryptjs";
 
 // Helper function to generate the password
@@ -149,5 +150,48 @@ export const getStudentRegistry = async (req, res) => {
     res.status(200).json(formattedStudents);
   } catch (err) {
     res.status(500).json({ message: "Error fetching students", error: err.message });
+  }
+};
+
+export const sendBroadcast = async (req, res) => {
+  try {
+    const { target, subject, message, isUrgent } = req.body;
+
+    if (!target || !subject || !message) {
+      return res.status(400).json({ message: "All fields are required!" });
+    }
+
+    // Check if Announcement model is loaded
+    if (!Announcement) {
+      throw new Error("Announcement Model is not loaded! Check imports.");
+    }
+
+    const newAnnouncement = new Announcement({
+      targetAudience: target,
+      title: subject,
+      message,
+      isUrgent: isUrgent || false,
+      sender: { role: 'admin', id: req.user?.id } // Safe access to ID
+    });
+
+    await newAnnouncement.save();
+
+    res.status(201).json({ 
+      message: "Broadcast sent successfully", 
+      data: newAnnouncement 
+    });
+
+  } catch (error) {
+    res.status(500).json({ message: "Server error sending broadcast", error: error.message });
+  }
+};
+
+export const getBroadcastHistory = async (req,res) => {
+  try {
+    const history = await Announcement.find({ 'sender.role' : 'admin'}).sort({createdAt: -1}).limit(5);
+
+    res.status(200).json(history);
+  } catch (error) {
+    res.status(500).json({ message: "Could not fetch history" });
   }
 };

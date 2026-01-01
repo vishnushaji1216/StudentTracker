@@ -1,23 +1,39 @@
 import express from "express";
-import { onboardUser, getTeacherRegistry, getStudentRegistry } from "../controllers/admin.controller.js";
+import { 
+  onboardUser, 
+  getTeacherRegistry, 
+  getStudentRegistry, 
+  sendBroadcast,        // Ensure these are imported
+  getBroadcastHistory   // Ensure these are imported
+} from "../controllers/admin.controller.js";
 import auth from "../middleware/auth.middleware.js";
 
 const router = express.Router();
 
 /**
- * Route: POST /api/admin/onboard
- * Description: Registers a new Teacher or Student
- * Access: Private (Admin only)
+ * Middleware: Admin Check
+ * Reusable function to block non-admins
  */
-router.post("/onboard", auth, (req, res, next) => {
-    // Only allow users with the 'admin' role (logged in via super key)
+const adminCheck = (req, res, next) => {
     if (req.user.role !== 'admin') {
         return res.status(403).json({ message: "Access denied: Admins only" });
     }
     next();
-}, onboardUser);
+};
+
+/**
+ * Route: POST /api/admin/onboard
+ * Description: Registers a new Teacher or Student
+ */
+// We use 'auth' (your import) and 'adminCheck' (defined above)
+router.post("/onboard", auth, adminCheck, onboardUser);
 
 router.get("/teachers", auth, getTeacherRegistry);
 router.get("/students", auth, getStudentRegistry);
+
+// --- BROADCAST ROUTES ---
+// Replaced 'protect' with 'auth' and 'admin' with 'adminCheck'
+router.post('/broadcast', auth, adminCheck, sendBroadcast);
+router.get('/broadcast-history', auth, adminCheck, getBroadcastHistory);
 
 export default router;
