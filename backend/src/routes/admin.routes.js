@@ -3,8 +3,9 @@ import {
   onboardUser, 
   getTeacherRegistry, 
   getStudentRegistry, 
-  sendBroadcast,        // Ensure these are imported
-  getBroadcastHistory   // Ensure these are imported
+  sendBroadcast,        
+  getBroadcastHistory,
+  deleteNotice
 } from "../controllers/admin.controller.js";
 import auth from "../middleware/auth.middleware.js";
 
@@ -35,5 +36,6 @@ router.get("/students", auth, getStudentRegistry);
 // Replaced 'protect' with 'auth' and 'admin' with 'adminCheck'
 router.post('/broadcast', auth, adminCheck, sendBroadcast);
 router.get('/broadcast-history', auth, adminCheck, getBroadcastHistory);
+router.delete('/broadcast/:id', auth, adminCheck, deleteNotice);
 
 export default router;

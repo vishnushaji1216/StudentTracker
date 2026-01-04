@@ -186,12 +186,35 @@ export const sendBroadcast = async (req, res) => {
   }
 };
 
-export const getBroadcastHistory = async (req,res) => {
+export const getBroadcastHistory = async (req, res) => {
   try {
-    const history = await Announcement.find({ 'sender.role' : 'admin'}).sort({createdAt: -1}).limit(5);
+    // Admin sees EVERYTHING (Global Feed) to moderate
+    const history = await Announcement.find({})
+      .sort({ createdAt: -1 })
+      .limit(50); // Increased limit
 
     res.status(200).json(history);
   } catch (error) {
+    console.error("History Error:", error);
     res.status(500).json({ message: "Could not fetch history" });
+  }
+};
+
+export const deleteNotice = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const notice = await Announcement.findById(id);
+
+    if (!notice) {
+      return res.status(404).json({ message: "Notice not found" });
+    }
+
+    // Admin has super-power to delete ANY notice (Admin's or Teacher's)
+    await notice.deleteOne();
+    
+    res.status(200).json({ message: "Notice deleted successfully" });
+  } catch (error) {
+    console.error("Delete Error:", error);
+    res.status(500).json({ message: "Failed to delete notice" });
   }
 };

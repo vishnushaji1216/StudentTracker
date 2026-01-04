@@ -3,6 +3,21 @@ import Assignment from "../models/assignment.model.js";
 import Announcement from "../models/announcement.model.js";
 
 // --- 1. GET TEACHER'S CLASSES & PROFILE ---
+export const getTeacherProfile = async (req, res) => {
+  try {
+    // Assuming req.user.id is set by your auth middleware
+    const teacher = await Teacher.findById(req.user.id).select('name teacherCode'); 
+    
+    if (!teacher) {
+      return res.status(404).json({ message: "Teacher not found" });
+    }
+
+    res.status(200).json(teacher);
+  } catch (error) {
+    res.status(500).json({ message: "Error fetching profile", error: error.message });
+  }
+};
+
 export const getMyClasses = async (req, res) => {
   try {
     const teacherId = req.user.id;

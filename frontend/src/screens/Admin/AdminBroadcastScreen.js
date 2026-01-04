@@ -10,8 +10,9 @@ import {
   Platform,
   Animated,
   BackHandler,
-  Alert,
-  ActivityIndicator
+  ActivityIndicator,
+  Modal,
+  Dimensions
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import FontAwesome5 from "react-native-vector-icons/FontAwesome5";
@@ -19,15 +20,26 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import api from "../../services/api";
 
 const SIDEBAR_WIDTH = 280;
+const { height } = Dimensions.get('window');
 
 export default function AdminBroadcastScreen({ navigation }) {
-  // --- SIDEBAR STATE ---
+  // --- ANIMATION REFS ---
   const slideAnim = useRef(new Animated.Value(-SIDEBAR_WIDTH)).current;
   const overlayAnim = useRef(new Animated.Value(0)).current;
+  const toastAnim = useRef(new Animated.Value(100)).current; 
+  
+  // Delete Modal Animations
+  const deleteScaleAnim = useRef(new Animated.Value(0.8)).current;
+  const deleteOpacityAnim = useRef(new Animated.Value(0)).current;
+
+  // --- UI STATE ---
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [toast, setToast] = useState({ visible: false, message: '', type: 'success' });
+  const [deleteModalVisible, setDeleteModalVisible] = useState(false);
+  const [noticeToDelete, setNoticeToDelete] = useState(null);
 
   // --- FORM STATE ---
-  const [target, setTarget] = useState('Everyone'); // Options: 'Everyone', 'Teachers', 'Parents'
+  const [target, setTarget] = useState('Everyone');
   const [subject, setSubject] = useState('');
   const [message, setMessage] = useState('');
   const [isUrgent, setIsUrgent] = useState(false);
@@ -49,7 +61,6 @@ export default function AdminBroadcastScreen({ navigation }) {
       setHistoryData(response.data);
     } catch (error) {
       console.error("Fetch History Error:", error);
-      // Optional: Alert.alert("Error", "Could not load history.");
     } finally {
       setLoading(false);
     }
@@ -58,72 +69,82 @@ export default function AdminBroadcastScreen({ navigation }) {
   // --- 2. SEND BROADCAST ---
   const handleSendBroadcast = async () => {
     if (!subject.trim() || !message.trim()) {
-      Alert.alert("Error", "Please enter both subject and message.");
+      showToast("Please enter subject and message", "error");
       return;
     }
 
     setSending(true);
     try {
       const payload = {
-        target: target, // Mapped to 'targetAudience' in backend
-        subject: subject, // Mapped to 'title' in backend
+        target: target,
+        subject: subject,
         message: message,
         isUrgent: isUrgent
       };
 
       await api.post('/admin/broadcast', payload);
 
-      Alert.alert("Success", "Broadcast sent successfully!", [
-        {
-          text: "OK",
-          onPress: () => {
-            // Reset Form
-            setSubject("");
-            setMessage("");
-            setIsUrgent(false);
-            setTarget("Everyone");
-            // Refresh List
-            fetchHistory();
-          }
-        }
-      ]);
+      showToast("Broadcast sent successfully!");
+      
+      // Reset Form
+      setSubject("");
+      setMessage("");
+      setIsUrgent(false);
+      setTarget("Everyone");
+      fetchHistory();
+
     } catch (error) {
-      console.error(error);
-      Alert.alert("Error", error.response?.data?.message || "Failed to send broadcast");
+      showToast(error.response?.data?.message || "Failed to send", "error");
     } finally {
       setSending(false);
     }
   };
 
-  // --- SIDEBAR & NAV LOGIC ---
-  useEffect(() => {
-    const backHandler = BackHandler.addEventListener(
-      "hardwareBackPress",
-      () => {
-        if (isSidebarOpen) {
-          toggleSidebar();
-          return true;
-        }
-        navigation.goBack();
-        return true;
-      }
-    );
-    return () => backHandler.remove();
-  }, [isSidebarOpen]);
+  // --- 3. DELETE ACTIONS ---
+  const confirmDelete = (id) => {
+    setNoticeToDelete(id);
+    setDeleteModalVisible(true);
+    Animated.parallel([
+        Animated.spring(deleteScaleAnim, { toValue: 1, useNativeDriver: true, friction: 7 }),
+        Animated.timing(deleteOpacityAnim, { toValue: 1, duration: 200, useNativeDriver: true })
+    ]).start();
+  };
+
+  const executeDelete = async () => {
+    if (!noticeToDelete) return;
+    try {
+      await api.delete(`/admin/broadcast/${noticeToDelete}`);
+      setHistoryData(prev => prev.filter(n => (n._id || n.id) !== noticeToDelete));
+      closeDeleteModal();
+      showToast("Notice deleted successfully");
+    } catch (error) {
+      closeDeleteModal();
+      showToast("Error deleting notice", "error");
+    }
+  };
+
+  // --- HELPER FUNCTIONS ---
+  const showToast = (message, type = 'success') => {
+    setToast({ visible: true, message, type });
+    Animated.spring(toastAnim, { toValue: 0, useNativeDriver: true }).start();
+    setTimeout(() => {
+      Animated.timing(toastAnim, { toValue: 100, duration: 300, useNativeDriver: true }).start(() => setToast(prev => ({ ...prev, visible: false })));
+    }, 2000);
+  };
+
+  const closeDeleteModal = () => {
+    Animated.timing(deleteOpacityAnim, { toValue: 0, duration: 200, useNativeDriver: true }).start(() => {
+        setDeleteModalVisible(false);
+        setNoticeToDelete(null);
+        deleteScaleAnim.setValue(0.8);
+    });
+  };
 
   const toggleSidebar = () => {
     const isOpen = isSidebarOpen;
     Animated.parallel([
-      Animated.timing(slideAnim, {
-        toValue: isOpen ? -SIDEBAR_WIDTH : 0,
-        duration: 300,
-        useNativeDriver: true,
-      }),
-      Animated.timing(overlayAnim, {
-        toValue: isOpen ? 0 : 0.5,
-        duration: 300,
-        useNativeDriver: true,
-      }),
+      Animated.timing(slideAnim, { toValue: isOpen ? -SIDEBAR_WIDTH : 0, duration: 300, useNativeDriver: true }),
+      Animated.timing(overlayAnim, { toValue: isOpen ? 0 : 0.5, duration: 300, useNativeDriver: true }),
     ]).start();
     setIsSidebarOpen(!isOpen);
   };
@@ -158,7 +179,6 @@ export default function AdminBroadcastScreen({ navigation }) {
       >
         <View style={styles.sidebarContainer}>
           <View>
-            {/* Sidebar Header */}
             <View style={styles.sidebarHeader}>
               <View style={styles.logoBox}>
                 <Text style={styles.logoText}>S</Text>
@@ -169,28 +189,11 @@ export default function AdminBroadcastScreen({ navigation }) {
               </View>
             </View>
 
-            {/* Navigation Items */}
             <View style={styles.menuSection}>
-              <SidebarItem 
-                icon="chart-pie" 
-                label="Dashboard" 
-                onPress={() => { toggleSidebar(); navigation.navigate('AdminDash'); }}
-              />
-              <SidebarItem 
-                icon="user-plus" 
-                label="Add User" 
-                onPress={() => { toggleSidebar(); navigation.navigate('AddUser'); }}
-              />
-              <SidebarItem 
-                icon="list-ul" 
-                label="Teacher Registry" 
-                onPress={() => { toggleSidebar(); navigation.navigate('TeacherRegistry'); }}
-              />
-              <SidebarItem 
-                icon="list-ul" 
-                label="Student Registry" 
-                onPress={() => { toggleSidebar(); navigation.navigate('StudentRegistry'); }}
-              />
+              <SidebarItem icon="chart-pie" label="Dashboard" onPress={() => { toggleSidebar(); navigation.navigate('AdminDash'); }} />
+              <SidebarItem icon="user-plus" label="Add User" onPress={() => { toggleSidebar(); navigation.navigate('AddUser'); }} />
+              <SidebarItem icon="list-ul" label="Teacher Registry" onPress={() => { toggleSidebar(); navigation.navigate('TeacherRegistry'); }} />
+              <SidebarItem icon="list-ul" label="Student Registry" onPress={() => { toggleSidebar(); navigation.navigate('StudentRegistry'); }} />
               <SidebarItem icon="bullhorn" label="Broadcast" active />
               <SidebarItem icon="graduation-cap" label="Promotion Tool" onPress={() => {toggleSidebar(); navigation.navigate('PromotionTool');}}/>
               <SidebarItem icon="shield-alt" label="Settings" onPress={() => {toggleSidebar();navigation.navigate('AdminSetting');}}/>
@@ -305,44 +308,65 @@ export default function AdminBroadcastScreen({ navigation }) {
               </TouchableOpacity>
             </View>
 
-            {/* 2. History Section - CONNECTED TO API */}
-            <Text style={[styles.sectionTitle, { marginTop: 8, marginBottom: 12 }]}>RECENT HISTORY</Text>
+            {/* 2. History Section */}
+            <Text style={[styles.sectionTitle, { marginTop: 8, marginBottom: 12 }]}>GLOBAL FEED & HISTORY</Text>
             
             {loading ? (
               <ActivityIndicator size="large" color="#4f46e5" style={{ marginTop: 20 }} />
             ) : historyData.length === 0 ? (
-              <Text style={{ textAlign: 'center', color: '#94a3b8', marginTop: 10 }}>No announcements sent yet.</Text>
+              <Text style={{ textAlign: 'center', color: '#94a3b8', marginTop: 10 }}>No announcements found.</Text>
             ) : (
-              historyData.map((item) => (
-                <View 
-                  key={item._id || item.id} 
-                  style={[styles.historyCard, item.isUrgent && styles.historyCardUrgent]}
-                >
-                  <View style={styles.historyHeader}>
-                    <View style={[styles.tag, item.isUrgent ? styles.tagUrgent : styles.tagNormal]}>
-                      <Text style={[styles.tagText, item.isUrgent ? styles.tagTextUrgent : styles.tagTextNormal]}>
-                        To: {item.targetAudience || item.to}
-                      </Text>
+              historyData.map((item) => {
+                const isAdmin = item.sender.role === 'admin';
+                return (
+                  <View 
+                    key={item._id || item.id} 
+                    style={[styles.historyCard, item.isUrgent && styles.historyCardUrgent, !isAdmin && styles.historyCardTeacher]}
+                  >
+                    <View style={styles.historyHeader}>
+                      <View style={{flexDirection: 'row', alignItems: 'center', gap: 8}}>
+                        <View style={[styles.tag, item.isUrgent ? styles.tagUrgent : styles.tagNormal]}>
+                          <Text style={[styles.tagText, item.isUrgent ? styles.tagTextUrgent : styles.tagTextNormal]}>
+                            To: {item.targetAudience === 'Class' ? item.targetClass : item.targetAudience}
+                          </Text>
+                        </View>
+                        {!isAdmin && (
+                           <View style={styles.teacherBadge}>
+                              <FontAwesome5 name="user-tie" size={8} color="#fff" />
+                              <Text style={styles.teacherBadgeText}>{item.sender.name || "Teacher"}</Text>
+                           </View>
+                        )}
+                      </View>
+                      
+                      <View style={{alignItems: 'flex-end'}}>
+                        <Text style={[styles.dateText, item.isUrgent && { color: '#f87171' }]}>
+                          {new Date(item.createdAt || item.date).toLocaleDateString()}
+                        </Text>
+                      </View>
                     </View>
-                    <Text style={[styles.dateText, item.isUrgent && { color: '#f87171' }]}>
-                      {new Date(item.createdAt || item.date).toLocaleDateString()}
+                    
+                    <View style={styles.historyTitleRow}>
+                      <View style={{flex: 1, flexDirection: 'row', alignItems: 'center'}}>
+                        {item.isUrgent && (
+                          <FontAwesome5 name="exclamation-circle" size={14} color="#b91c1c" style={{ marginRight: 6 }} />
+                        )}
+                        <Text style={[styles.historyTitle, item.isUrgent && { color: '#991b1b' }]}>
+                          {item.title}
+                        </Text>
+                      </View>
+                      
+                      {/* DELETE BUTTON */}
+                      <TouchableOpacity onPress={() => confirmDelete(item._id || item.id)} style={{padding: 4}}>
+                         <FontAwesome5 name="trash-alt" size={14} color="#ef4444" />
+                      </TouchableOpacity>
+                    </View>
+                    
+                    <Text style={[styles.historyPreview, item.isUrgent && { color: '#dc2626' }]} numberOfLines={2}>
+                      {item.message || item.preview}
                     </Text>
                   </View>
-                  
-                  <View style={styles.historyTitleRow}>
-                    {item.isUrgent && (
-                      <FontAwesome5 name="exclamation-circle" size={14} color="#b91c1c" style={{ marginRight: 6 }} />
-                    )}
-                    <Text style={[styles.historyTitle, item.isUrgent && { color: '#991b1b' }]}>
-                      {item.title}
-                    </Text>
-                  </View>
-                  
-                  <Text style={[styles.historyPreview, item.isUrgent && { color: '#dc2626' }]} numberOfLines={2}>
-                    {item.message || item.preview}
-                  </Text>
-                </View>
-              ))
+                );
+              })
             )}
 
           </View>
@@ -367,7 +391,55 @@ export default function AdminBroadcastScreen({ navigation }) {
           </TouchableOpacity>
         </View>
 
+        {/* --- TOAST NOTIFICATION --- */}
+        {toast.visible && (
+          <Animated.View 
+            style={[
+              styles.toast, 
+              toast.type === 'error' ? styles.toastError : styles.toastSuccess,
+              { transform: [{ translateY: toastAnim }] }
+            ]}
+            pointerEvents="none"
+          >
+             <FontAwesome5 
+                name={toast.type === 'error' ? 'exclamation-circle' : 'check-circle'} 
+                size={16} 
+                color="#fff" 
+             />
+             <Text style={styles.toastText}>{toast.message}</Text>
+          </Animated.View>
+        )}
+
       </SafeAreaView>
+
+      {/* --- CUSTOM DELETE MODAL --- */}
+      <Modal transparent visible={deleteModalVisible} animationType="none" onRequestClose={closeDeleteModal}>
+          <View style={styles.modalBackdrop}>
+             <Animated.View style={[styles.deleteModalContainer, { opacity: deleteOpacityAnim, transform: [{ scale: deleteScaleAnim }] }]}>
+                
+                <View style={styles.deleteIconContainer}>
+                    <FontAwesome5 name="trash-alt" size={24} color="#ef4444" />
+                </View>
+
+                <Text style={styles.deleteModalTitle}>Delete Broadcast?</Text>
+                <Text style={styles.deleteModalSub}>
+                    Are you sure you want to remove this announcement? It will be removed for all users.
+                </Text>
+
+                <View style={styles.deleteModalActions}>
+                    <TouchableOpacity style={styles.cancelModalBtn} onPress={closeDeleteModal}>
+                        <Text style={styles.cancelModalText}>Cancel</Text>
+                    </TouchableOpacity>
+                    
+                    <TouchableOpacity style={styles.confirmDeleteBtn} onPress={executeDelete}>
+                        <Text style={styles.confirmDeleteText}>Yes, Delete</Text>
+                    </TouchableOpacity>
+                </View>
+
+             </Animated.View>
+          </View>
+      </Modal>
+
     </View>
   );
 }
@@ -446,6 +518,7 @@ const styles = StyleSheet.create({
   /* History Items */
   historyCard: { backgroundColor: '#fff', padding: 12, borderRadius: 12, borderWidth: 1, borderColor: '#e2e8f0', marginBottom: 12 },
   historyCardUrgent: { backgroundColor: '#fef2f2', borderColor: '#fee2e2' },
+  historyCardTeacher: { borderColor: '#cbd5e1', borderLeftWidth: 4, borderLeftColor: '#64748b' }, // Visual distinction for teacher posts
   
   historyHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
   tag: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6, borderWidth: 1 },
@@ -454,9 +527,13 @@ const styles = StyleSheet.create({
   tagText: { fontSize: 10, fontWeight: 'bold' },
   tagTextNormal: { color: '#64748b' },
   tagTextUrgent: { color: '#ef4444' },
+  
+  teacherBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#64748b', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
+  teacherBadgeText: { color: '#fff', fontSize: 8, fontWeight: 'bold' },
+
   dateText: { fontSize: 10, color: '#94a3b8', fontWeight: '600' },
 
-  historyTitleRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 4 },
+  historyTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
   historyTitle: { fontSize: 14, fontWeight: 'bold', color: '#1e293b' },
   historyPreview: { fontSize: 12, color: '#64748b' },
 
@@ -464,4 +541,22 @@ const styles = StyleSheet.create({
   bottomNav: { flexDirection: 'row', backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#e2e8f0', paddingVertical: 10, paddingBottom: Platform.OS === 'ios' ? 25 : 10, justifyContent: 'space-around', alignItems: 'center', elevation: 10 },
   navItem: { alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20 },
   navLabel: { fontSize: 10, fontWeight: '600', color: '#94a3b8', marginTop: 4 },
+
+  /* --- TOAST STYLES --- */
+  toast: { position: 'absolute', bottom: 100, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, paddingHorizontal: 20, borderRadius: 30, zIndex: 999, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 10 },
+  toastSuccess: { backgroundColor: '#16a34a' },
+  toastError: { backgroundColor: '#ef4444' },
+  toastText: { color: '#fff', fontWeight: 'bold', fontSize: 14 },
+
+  /* --- MODAL STYLES --- */
+  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
+  deleteModalContainer: { width: '80%', backgroundColor: '#fff', borderRadius: 24, padding: 24, alignItems: 'center', elevation: 10 },
+  deleteIconContainer: { width: 60, height: 60, borderRadius: 30, backgroundColor: '#fef2f2', justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
+  deleteModalTitle: { fontSize: 18, fontWeight: 'bold', color: '#1e293b', marginBottom: 8 },
+  deleteModalSub: { fontSize: 13, color: '#64748b', textAlign: 'center', marginBottom: 24, lineHeight: 20 },
+  deleteModalActions: { flexDirection: 'row', gap: 12, width: '100%' },
+  cancelModalBtn: { flex: 1, paddingVertical: 14, borderRadius: 12, backgroundColor: '#f1f5f9', alignItems: 'center' },
+  cancelModalText: { color: '#64748b', fontWeight: 'bold' },
+  confirmDeleteBtn: { flex: 1, paddingVertical: 14, borderRadius: 12, backgroundColor: '#ef4444', alignItems: 'center' },
+  confirmDeleteText: { color: '#fff', fontWeight: 'bold' },
 });
