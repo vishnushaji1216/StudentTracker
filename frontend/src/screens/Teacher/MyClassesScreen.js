@@ -10,11 +10,13 @@ import {
   Platform,
   LayoutAnimation,
   UIManager,
-  Dimensions
+  ActivityIndicator, // Added for loading state
+  Alert
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import FontAwesome5 from "react-native-vector-icons/FontAwesome5";
-import TeacherSidebar from "../../components/TeacherSidebar"; // Import the component
+import TeacherSidebar from "../../components/TeacherSidebar"; 
+import api from "../../services/api"; // 1. Import API
 
 // Enable LayoutAnimation on Android
 if (Platform.OS === 'android') {
@@ -23,62 +25,50 @@ if (Platform.OS === 'android') {
   }
 }
 
-// Mock Data
-const CLASSES = [
-  {
-    id: '9-A',
-    name: 'Class 9-A',
-    subject: 'Mathematics',
-    students: 42,
-    avg: '78%',
-    isClassTeacher: true,
-    topic: 'Ch 5: Arithmetic',
-    notesStatus: 'Done', 
-    quizStatus: 'Pending'
-  },
-  {
-    id: '10-B',
-    name: 'Class 10-B',
-    subject: 'Physics',
-    students: 38,
-    avg: '62%',
-    isClassTeacher: false,
-    topic: 'Ch 3: Light & Optics',
-    notesStatus: 'Pending',
-    quizStatus: 'Pending'
-  },
-  {
-    id: '10-C',
-    name: 'Class 10-C',
-    subject: 'Physics',
-    students: 40,
-    avg: '74%',
-    isClassTeacher: false,
-    topic: 'Ch 3: Light & Optics',
-    notesStatus: 'Done',
-    quizStatus: 'Done'
-  }
-];
-
 export default function MyClassesScreen({ navigation }) {
   // Sidebar State
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-
-  // Accordion State
   const [expandedId, setExpandedId] = useState(null);
+
+  // --- 2. NEW STATE FOR DATA ---
+  const [classesData, setClassesData] = useState([]);
+  const [summary, setSummary] = useState({ totalStudents: 0, totalClasses: 0 });
+  const [isLoading, setIsLoading] = useState(true);
 
   // Handle Android Back Button
   useEffect(() => {
     const backHandler = BackHandler.addEventListener("hardwareBackPress", () => {
       if (isSidebarOpen) {
-        setIsSidebarOpen(false); // Close sidebar if open
+        setIsSidebarOpen(false);
         return true;
       }
-      navigation.navigate('TeacherDash'); // Go back to Dash otherwise
+      navigation.navigate('TeacherDash');
       return true;
     });
     return () => backHandler.remove();
   }, [isSidebarOpen]);
+
+  // --- 3. FETCH DATA ON MOUNT ---
+  useEffect(() => {
+    fetchClasses();
+  }, []);
+
+  const fetchClasses = async () => {
+    try {
+      // Assuming your teacher routes are mounted at '/teachers' in server.js
+      const response = await api.get('/teacher/classes');
+      
+      if (response.data) {
+        setClassesData(response.data.classes);
+        setSummary(response.data.summary);
+      }
+    } catch (error) {
+      console.error("Error fetching classes:", error);
+      Alert.alert("Error", "Could not load class data.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const toggleAccordion = (id) => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
@@ -86,15 +76,24 @@ export default function MyClassesScreen({ navigation }) {
   };
 
   const navigateToClass = (classId) => {
-    // Navigate to Detail Screen
     navigation.navigate('TClassDetail', { classId });
   };
+
+  // --- LOADING VIEW ---
+  if (isLoading) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color="#4f46e5" />
+        <Text style={{ marginTop: 10, color: '#64748b' }}>Loading Classes...</Text>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#fff" />
 
-      {/* --- REUSABLE SIDEBAR COMPONENT --- */}
+      {/* Sidebar */}
       <TeacherSidebar 
         isOpen={isSidebarOpen}
         onClose={() => setIsSidebarOpen(false)}
@@ -102,7 +101,7 @@ export default function MyClassesScreen({ navigation }) {
         activeItem="MyClasses"
       />
 
-      {/* --- MAIN CONTENT --- */}
+      {/* Main Content */}
       <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
         
         {/* Header */}
@@ -125,43 +124,53 @@ export default function MyClassesScreen({ navigation }) {
         >
           <View style={styles.contentPadding}>
             
-            {/* 1. SUMMARY CARD */}
+            {/* 1. DYNAMIC SUMMARY CARD */}
             <View style={styles.summaryCard}>
               <View>
                 <Text style={styles.summaryLabel}>TOTAL STUDENTS</Text>
-                <Text style={styles.summaryValue}>120</Text>
+                {/* Display fetched total */}
+                <Text style={styles.summaryValue}>{summary.totalStudents}</Text>
               </View>
               <View style={{ alignItems: 'flex-end' }}>
-                <Text style={styles.summarySub}>Across 3 Classes</Text>
+                {/* Display fetched count */}
+                <Text style={styles.summarySub}>Across {summary.totalClasses} Classes</Text>
                 <FontAwesome5 name="users" size={24} color="#fff" style={{ marginTop: 4, opacity: 0.9 }} />
               </View>
             </View>
 
-            {/* 2. CLASS TEACHER SECTION */}
+            {/* 2. CLASS TEACHER SECTION (Filtered from API data) */}
             <Text style={styles.sectionTitle}>PRIMARY RESPONSIBILITY</Text>
             
-            {CLASSES.filter(c => c.isClassTeacher).map((item) => (
-              <ClassCard 
-                key={item.id} 
-                item={item} 
-                expanded={expandedId === item.id}
-                onToggle={() => toggleAccordion(item.id)}
-                onEnter={() => navigateToClass(item.id)}
-              />
-            ))}
+            {classesData.filter(c => c.isClassTeacher).length > 0 ? (
+                classesData.filter(c => c.isClassTeacher).map((item) => (
+                  <ClassCard 
+                    key={item.id} 
+                    item={item} 
+                    expanded={expandedId === item.id}
+                    onToggle={() => toggleAccordion(item.id)}
+                    onEnter={() => navigateToClass(item.id)}
+                  />
+                ))
+            ) : (
+                <Text style={styles.emptyText}>No primary class assigned.</Text>
+            )}
 
-            {/* 3. SUBJECT TEACHER SECTION */}
+            {/* 3. SUBJECT TEACHER SECTION (Filtered from API data) */}
             <Text style={styles.sectionTitle}>SUBJECT CLASSES</Text>
             
-            {CLASSES.filter(c => !c.isClassTeacher).map((item) => (
-              <ClassCard 
-                key={item.id} 
-                item={item} 
-                expanded={expandedId === item.id}
-                onToggle={() => toggleAccordion(item.id)}
-                onEnter={() => navigateToClass(item.id)}
-              />
-            ))}
+            {classesData.filter(c => !c.isClassTeacher).length > 0 ? (
+                classesData.filter(c => !c.isClassTeacher).map((item) => (
+                  <ClassCard 
+                    key={item.id} 
+                    item={item} 
+                    expanded={expandedId === item.id}
+                    onToggle={() => toggleAccordion(item.id)}
+                    onEnter={() => navigateToClass(item.id)}
+                  />
+                ))
+            ) : (
+                <Text style={styles.emptyText}>No subject classes found.</Text>
+            )}
 
           </View>
         </ScrollView>
@@ -173,7 +182,6 @@ export default function MyClassesScreen({ navigation }) {
             <Text style={styles.navLabel}>Dash</Text>
           </TouchableOpacity>
 
-          {/* Classes is Active (Blue) */}
           <TouchableOpacity style={styles.navItem} onPress={() => navigation.navigate('MyClasses')}>
             <FontAwesome5 name="chalkboard-teacher" size={20} color="#4f46e5" />
             <Text style={[styles.navLabel, { color: '#4f46e5' }]}>Classes</Text>
@@ -211,9 +219,9 @@ const ClassCard = ({ item, expanded, onToggle, onEnter }) => (
             <Text style={styles.ctText}>CLASS TEACHER</Text>
           </View>
         ) : (
-          <View style={[styles.ctBadge, { backgroundColor: item.id === '10-B' ? '#fff7ed' : '#eff6ff' }]}>
-             <Text style={[styles.ctText, { color: item.id === '10-B' ? '#f97316' : '#2563eb' }]}>
-               PHYSICS
+          <View style={[styles.ctBadge, { backgroundColor: '#eff6ff' }]}>
+             <Text style={[styles.ctText, { color: '#2563eb' }]}>
+               {item.subject.toUpperCase()}
              </Text>
           </View>
         )}
@@ -232,7 +240,7 @@ const ClassCard = ({ item, expanded, onToggle, onEnter }) => (
           <Text style={styles.label}>CURRENT TOPIC</Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <FontAwesome5 name="book-open" size={12} color="#4f46e5" />
-            <Text style={styles.topicText}>{item.topic}</Text>
+            <Text style={styles.topicText}>{item.topic || "No Active Topic"}</Text>
           </View>
         </View>
 
@@ -288,6 +296,7 @@ const ClassCard = ({ item, expanded, onToggle, onEnter }) => (
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F8FAFC" },
   safeArea: { flex: 1 },
+  emptyText: { color: '#94a3b8', fontStyle: 'italic', fontSize: 12, marginBottom: 10, marginLeft: 4 },
 
   /* Header */
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 16, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },

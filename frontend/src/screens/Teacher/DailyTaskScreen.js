@@ -7,20 +7,20 @@ import {
   StyleSheet,
   ScrollView,
   StatusBar,
-  Image,
   Animated,
   BackHandler,
   Platform,
-  LayoutAnimation,
   UIManager,
   FlatList,
   ActivityIndicator,
-  Modal 
+  Modal,
+  Dimensions
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import FontAwesome5 from "react-native-vector-icons/FontAwesome5";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import api from "../../services/api";
+import TeacherSidebar from "../../components/TeacherSidebar"; // 1. Import Sidebar
 
 // Enable Animations
 if (Platform.OS === 'android') {
@@ -29,34 +29,25 @@ if (Platform.OS === 'android') {
   }
 }
 
-const SIDEBAR_WIDTH = 280;
-const { height } = Platform.OS === 'ios' ? require('react-native').Dimensions.get('window') : { height: 800 };
+const { height } = Dimensions.get('window');
 
 export default function DailyTaskScreen({ navigation }) {
   // --- STATE ---
-  const slideAnim = useRef(new Animated.Value(-SIDEBAR_WIDTH)).current;
-  const overlayAnim = useRef(new Animated.Value(0)).current;
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  
+  // Create Panel Animation
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
   const createPanelAnim = useRef(new Animated.Value(height)).current;
   
-  // Profile State (Dynamic)
-  const [profile, setProfile] = useState({ 
-    name: 'Loading...', 
-    code: '...', 
-    mainClass: '' 
-  });
-
   // Toast State
   const [toast, setToast] = useState({ visible: false, message: '', type: 'success' });
   const toastAnim = useRef(new Animated.Value(100)).current; 
 
-  // Modal State (Custom Delete Confirmation)
+  // Modal State
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [taskToDelete, setTaskToDelete] = useState(null);
   const deleteScaleAnim = useRef(new Animated.Value(0.8)).current; 
   const deleteOpacityAnim = useRef(new Animated.Value(0)).current;
-
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [isCreateOpen, setIsCreateOpen] = useState(false);
 
   // Data
   const [tasks, setTasks] = useState([]);
@@ -81,6 +72,23 @@ export default function DailyTaskScreen({ navigation }) {
     fetchClasses();
     fetchTasks();
   }, []);
+
+  // Handle Android Back Button
+  useEffect(() => {
+    const backHandler = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (isSidebarOpen) {
+        setIsSidebarOpen(false);
+        return true;
+      }
+      if (isCreateOpen) {
+        closeCreatePanel();
+        return true;
+      }
+      navigation.navigate('TeacherDash'); // Go back to Dash otherwise
+      return true;
+    });
+    return () => backHandler.remove();
+  }, [isSidebarOpen, isCreateOpen]);
 
   // --- TOAST FUNCTION ---
   const showToast = (message, type = 'success') => {
@@ -109,26 +117,26 @@ export default function DailyTaskScreen({ navigation }) {
 
   const fetchClasses = async () => {
     try {
+      // 2. Fetch from Correct Endpoint
       const response = await api.get('/teacher/classes');
       
-      // 1. Set Profile Data from Backend
-      setProfile({
-        name: response.data.name || "Teacher",
-        code: response.data.teacherCode || "T-XXXX",
-        mainClass: response.data.classTeachership || "N/A"
-      });
-
-      // 2. Set Class List for Dropdown
-      const classSet = new Set();
-      if (response.data.classTeachership) classSet.add(response.data.classTeachership);
-      if (response.data.assignedClasses) response.data.assignedClasses.forEach(c => classSet.add(c.class));
-      const classesArray = Array.from(classSet);
-      setMyClasses(classesArray);
+      // 3. Parse NEW JSON Structure
+      // The API now returns: { profile: {...}, summary: {...}, classes: [{ id: '9-A', ... }] }
+      const fetchedClasses = response.data.classes || [];
       
-      if (classesArray.length > 0) setSelectedClass(classesArray[0]);
+      // Extract just the class IDs (names) for the dropdown
+      // Using a Set to ensure uniqueness, though the API likely handles this
+      const classNames = fetchedClasses.map(c => c.id);
+      
+      setMyClasses(classNames);
+      
+      if (classNames.length > 0) {
+        setSelectedClass(classNames[0]);
+      }
 
     } catch (error) {
       console.error("Fetch Classes Error:", error);
+      showToast("Could not load class list", "error");
     }
   };
 
@@ -198,7 +206,7 @@ export default function DailyTaskScreen({ navigation }) {
     try {
       const payload = {
         className: selectedClass,
-        subject: "General",
+        subject: "General", // You might want to fetch the subject for this class if available
         title: taskTitle,
         type: taskType,
         dueDate: new Date(),
@@ -226,20 +234,6 @@ export default function DailyTaskScreen({ navigation }) {
   };
 
   // --- UI HELPERS ---
-  const toggleSidebar = () => {
-    const isOpen = isSidebarOpen;
-    Animated.parallel([
-      Animated.timing(slideAnim, { toValue: isOpen ? -SIDEBAR_WIDTH : 0, duration: 300, useNativeDriver: true }),
-      Animated.timing(overlayAnim, { toValue: isOpen ? 0 : 0.5, duration: 300, useNativeDriver: true }),
-    ]).start();
-    setIsSidebarOpen(!isOpen);
-  };
-
-  const handleNav = (screen) => {
-    toggleSidebar();
-    navigation.navigate(screen);
-  };
-
   const openCreatePanel = () => {
     setIsCreateOpen(true);
     Animated.spring(createPanelAnim, { toValue: 0, useNativeDriver: true, damping: 20, stiffness: 90 }).start();
@@ -247,13 +241,6 @@ export default function DailyTaskScreen({ navigation }) {
 
   const closeCreatePanel = () => {
     Animated.timing(createPanelAnim, { toValue: height, duration: 200, useNativeDriver: true }).start(() => setIsCreateOpen(false));
-  };
-
-  const handleLogout = async () => {
-    try {
-        await AsyncStorage.multiRemove(["token", "user", "role"]);
-        navigation.replace("Login", { skipAnimation: true });
-    } catch(e) {}
   };
 
   const renderTaskCard = ({ item }) => {
@@ -313,59 +300,20 @@ export default function DailyTaskScreen({ navigation }) {
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#fff" />
 
-      {/* Sidebar Overlays */}
-      <Animated.View style={[styles.overlay, { opacity: overlayAnim }]} pointerEvents={isSidebarOpen ? "auto" : "none"}>
-        <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={toggleSidebar} />
-      </Animated.View>
-
-      <Animated.View style={[styles.sidebar, { transform: [{ translateX: slideAnim }] }]}>
-        <View style={styles.sidebarContainer}>
-          <View style={{ flex: 1 }}>
-            
-            {/* --- DYNAMIC SIDEBAR HEADER --- */}
-            <View style={styles.sidebarHeader}>
-              <Image source={{ uri: "https://i.pravatar.cc/150?img=5" }} style={styles.profilePic} />
-              <View>
-                <Text style={styles.teacherName}>{profile.name}</Text>
-                <Text style={styles.teacherCode}>{profile.code}</Text>
-              </View>
-              <View style={styles.classTag}>
-                <Text style={styles.classTagText}>Class Teacher: {profile.mainClass || 'N/A'}</Text>
-              </View>
-            </View>
-
-            <ScrollView style={styles.menuScroll} showsVerticalScrollIndicator={false}>
-              <SidebarItem icon="chart-pie" label="Dashboard" onPress={() => handleNav('TeacherDash')} />
-              <SidebarItem icon="calendar-check" label="Daily Tasks" onPress={() => handleNav('DailyTask')} active={true} />
-              <SidebarItem icon="chalkboard-teacher" label="My Classes" onPress={() => handleNav('MyClasses')} />
-              <SidebarItem icon="users" label="Student Directory" onPress={() => handleNav('StudentDirectory')} />
-              <View style={styles.menuDivider} />
-              <Text style={styles.menuSectionLabel}>CONTENT & GRADING</Text>
-              <SidebarItem icon="list-ul" label="Quiz Manager" onPress={() => handleNav('QuizDashboard')} />
-              <SidebarItem icon="pen-fancy" label="Handwriting Review" onPress={() => handleNav('HandwritingReview')} />
-              <SidebarItem icon="headphones" label="Audio Review" onPress={() => handleNav('AudioReview')} />
-              <SidebarItem icon="bullhorn" label="Notice Board" onPress={() => handleNav('NoticeBoard')} />
-              <SidebarItem icon="folder-open" label="Resource Library" onPress={() => handleNav('ResourceLibrary')} />
-            </ScrollView>
-          </View>
-          <View style={styles.sidebarFooter}>
-            <TouchableOpacity style={styles.settingsBtn} onPress={() => handleNav('TeacherSetting')}>
-              <FontAwesome5 name="cog" size={16} color="#64748b" />
-              <Text style={styles.settingsText}>Settings</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
-              <FontAwesome5 name="sign-out-alt" size={16} color="#ef4444" />
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Animated.View>
+      {/* --- 4. REPLACED HARDCODED SIDEBAR WITH COMPONENT --- */}
+      <TeacherSidebar 
+        isOpen={isSidebarOpen}
+        onClose={() => setIsSidebarOpen(false)}
+        navigation={navigation}
+        activeItem="DailyTask"
+      />
 
       {/* Main Content */}
       <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
         <View style={styles.header}>
           <View style={styles.headerTop}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 15 }}>
-              <TouchableOpacity onPress={toggleSidebar} style={styles.menuButton}>
+              <TouchableOpacity onPress={() => setIsSidebarOpen(true)} style={styles.menuButton}>
                 <FontAwesome5 name="bars" size={20} color="#1e293b" />
               </TouchableOpacity>
               <Text style={styles.headerTitle}>Daily Planner</Text>
@@ -560,35 +508,10 @@ export default function DailyTaskScreen({ navigation }) {
   );
 }
 
-const SidebarItem = ({ icon, label, onPress, active }) => (
-  <TouchableOpacity style={[styles.sidebarItem, active && styles.sidebarItemActive]} onPress={onPress}>
-    <FontAwesome5 name={icon} size={16} color={active ? "#4f46e5" : "#64748b"} style={{ width: 24 }} />
-    <Text style={[styles.sidebarItemText, active && { color: "#4f46e5", fontWeight: '700' }]}>{label}</Text>
-  </TouchableOpacity>
-);
-
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F8FAFC" },
   safeArea: { flex: 1 },
-  overlay: { position: "absolute", inset: 0, backgroundColor: "rgba(0,0,0,0.5)", zIndex: 50 },
-  sidebar: { position: "absolute", left: 0, top: 0, bottom: 0, width: SIDEBAR_WIDTH, backgroundColor: "#fff", zIndex: 51, elevation: 20 },
-  sidebarContainer: { flex: 1, paddingTop: Platform.OS === 'ios' ? 50 : 20, paddingHorizontal: 20, paddingBottom: 20, justifyContent: 'space-between' },
-  sidebarHeader: { marginBottom: 10,paddingBottom: 20,borderBottomWidth: 1, borderBottomColor: '#F1F5F9',flexDirection: 'column', gap: 12},
-  profilePic: { width: 50, height: 50, borderRadius: 25, borderWidth: 1, borderColor: '#e2e8f0' },
-  teacherName: { fontSize: 16, fontWeight: 'bold', color: '#1e293b' },
-  teacherCode: { fontSize: 12, color: '#64748b' },
-  classTag: { marginTop: 0, alignSelf: 'flex-start',  backgroundColor: '#eef2ff', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20, marginLeft: 62 },
-  classTagText: { fontSize: 10, fontWeight: 'bold', color: '#4f46e5', textTransform: 'uppercase' },
-  menuScroll: { marginTop: 20, flex: 1 },
-  menuDivider: { height: 1, backgroundColor: '#f1f5f9', marginVertical: 10 },
-  menuSectionLabel: { fontSize: 10, fontWeight: 'bold', color: '#94a3b8', marginBottom: 8, marginLeft: 12, letterSpacing: 0.5 },
-  sidebarItem: { flexDirection: 'row', alignItems: 'center', padding: 12, borderRadius: 12 },
-  sidebarItemActive: { backgroundColor: '#eef2ff' },
-  sidebarItemText: { fontSize: 14, fontWeight: '600', color: '#64748b' },
-  sidebarFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 10, borderTopWidth: 1, borderTopColor: '#f1f5f9' },
-  settingsBtn: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  settingsText: { fontSize: 14, fontWeight: '600', color: '#64748b' },
-  logoutBtn: { padding: 8, backgroundColor: '#fef2f2', borderRadius: 8 },
+  // Removed old Sidebar styles as they are now in the component
   header: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 8, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
   headerTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#1e293b' },

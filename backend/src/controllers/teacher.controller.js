@@ -1,4 +1,6 @@
 import Teacher from "../models/teacher.model.js";
+import Student from "../models/student.model.js";
+import Syllabus from "../models/syllabus.model.js";
 import Assignment from "../models/assignment.model.js";
 import Announcement from "../models/announcement.model.js";
 
@@ -21,18 +23,64 @@ export const getTeacherProfile = async (req, res) => {
 export const getMyClasses = async (req, res) => {
   try {
     const teacherId = req.user.id;
+    
+    // 1. Fetch Teacher
     const teacher = await Teacher.findById(teacherId);
+    if (!teacher) return res.status(404).json({ message: "Teacher not found" });
 
-    if (!teacher) {
-      return res.status(404).json({ message: "Teacher not found" });
-    }
+    // 2. Identify Classes
+    const primaryClass = teacher.classTeachership; 
+    const assignedClasses = teacher.assignments; 
+    const subjectClassNames = assignedClasses.map(a => a.class);
+    const allClassNames = [...new Set([primaryClass, ...subjectClassNames].filter(Boolean))];
 
+    // 3. Stats Aggregation (Same as before)
+    const studentStats = await Student.aggregate([
+      { $match: { className: { $in: allClassNames } } },
+      { $group: { _id: "$className", count: { $sum: 1 }, avgScore: { $avg: "$stats.avgScore" } } }
+    ]);
+
+    const getStats = (className) => {
+      const stat = studentStats.find(s => s._id === className);
+      return { count: stat ? stat.count : 0, avg: stat && stat.avgScore ? Math.round(stat.avgScore) + "%" : "0%" };
+    };
+
+    // 4. Build Class Cards
+    const classesData = await Promise.all(assignedClasses.map(async (assign) => {
+      const syllabusDoc = await Syllabus.findOne({ teacher: teacherId, className: assign.class, subject: assign.subject });
+      const currentChapter = syllabusDoc?.chapters.find(ch => ch.isCurrent);
+
+      return {
+        id: assign.class,
+        name: `Class ${assign.class}`,
+        subject: assign.subject,
+        isClassTeacher: (assign.class === primaryClass),
+        students: getStats(assign.class).count,
+        avg: getStats(assign.class).avg,
+        topic: currentChapter ? `Ch ${currentChapter.chapterNo}: ${currentChapter.title}` : "No Active Topic",
+        notesStatus: currentChapter ? currentChapter.notesStatus : "Pending",
+        quizStatus: currentChapter ? currentChapter.quizStatus : "Pending",
+      };
+    }));
+
+    // 5. Total Students
+    const totalStudents = studentStats.reduce((acc, curr) => acc + curr.count, 0);
+
+    // --- SEND RESPONSE ---
     res.status(200).json({
-      name: teacher.name,
-      teacherCode: teacher.teacherCode,
-      classTeachership: teacher.classTeachership,
-      assignedClasses: teacher.assignments
+      // ADDED: Profile Data for DailyTaskScreen
+      profile: {
+        name: teacher.name,
+        teacherCode: teacher.teacherCode,
+        classTeachership: teacher.classTeachership
+      },
+      summary: {
+        totalStudents,
+        totalClasses: allClassNames.length
+      },
+      classes: classesData
     });
+
   } catch (error) {
     console.error("Get Classes Error:", error);
     res.status(500).json({ message: "Server error fetching classes" });
