@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -7,130 +7,97 @@ import {
   StyleSheet,
   FlatList,
   StatusBar,
-  ScrollView,
   Image,
   Animated,
   BackHandler,
   Platform,
   LayoutAnimation,
   UIManager,
-  Dimensions
+  ActivityIndicator
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import FontAwesome5 from "react-native-vector-icons/FontAwesome5";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import TeacherSidebar from "../../components/TeacherSidebar"; // 1. Import Sidebar
+import api from "../../services/api"; // 2. Import API
 
-// Enable LayoutAnimation for Dropdown
 if (Platform.OS === 'android') {
   if (UIManager.setLayoutAnimationEnabledExperimental) {
     UIManager.setLayoutAnimationEnabledExperimental(true);
   }
 }
 
-const SIDEBAR_WIDTH = 280;
-const { width } = Dimensions.get('window');
-
-// Mock Data
-const STUDENTS = [
-  {
-    id: "1",
-    name: "Arjun Kumar",
-    roll: "24",
-    className: "9-A",
-    initials: "AK",
-    avg: "78%",
-    statusColor: "#16a34a", // Green
-    bg: "#f0fdf4",
-    initialsColor: "#4f46e5",
-    initialsBg: "#eef2ff"
-  },
-  {
-    id: "2",
-    name: "Diya Singh",
-    roll: "25",
-    className: "9-A",
-    initials: "DS",
-    avg: "45%",
-    statusColor: "#f97316", // Orange
-    bg: "#fff7ed",
-    initialsColor: "#64748b",
-    initialsBg: "#f1f5f9"
-  },
-  {
-    id: "3",
-    name: "Karan Vohra",
-    roll: "26",
-    className: "9-A",
-    initials: "KV",
-    avg: "65%",
-    statusColor: "#475569", // Slate
-    bg: "#f8fafc",
-    initialsColor: "#3b82f6",
-    initialsBg: "#eff6ff"
-  },
-  {
-    id: "4",
-    name: "Fatima Z.",
-    roll: "27",
-    className: "10-B",
-    initials: "FZ",
-    avg: "82%",
-    statusColor: "#16a34a",
-    bg: "#f0fdf4",
-    initialsColor: "#16a34a",
-    initialsBg: "#f0fdf4"
-  },
-  {
-    id: "5",
-    name: "Gaurav M.",
-    roll: "28",
-    className: "10-C",
-    initials: "GM",
-    avg: "70%",
-    statusColor: "#475569",
-    bg: "#f8fafc",
-    initialsColor: "#ca8a04",
-    initialsBg: "#fefce8"
-  },
-];
-
-const CLASS_OPTIONS = ["All Classes", "Class 9-A (Math)", "Class 10-B (Physics)", "Class 10-C (Physics)"];
-
 export default function StudentDirectoryScreen({ navigation }) {
-  // State
+  // --- STATE ---
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedClass, setSelectedClass] = useState("All Classes");
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
-  // Sidebar Animations
-  const slideAnim = useRef(new Animated.Value(-SIDEBAR_WIDTH)).current;
-  const overlayAnim = useRef(new Animated.Value(0)).current;
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  // Data State
+  const [students, setStudents] = useState([]);
+  const [filteredStudents, setFilteredStudents] = useState([]);
+  const [classOptions, setClassOptions] = useState(["All Classes"]);
+  const [loading, setLoading] = useState(true);
+
+  // --- EFFECT: FETCH DATA ---
+  useEffect(() => {
+    fetchDirectory();
+  }, []);
+
+  // --- EFFECT: FILTER LOGIC ---
+  useEffect(() => {
+    filterData();
+  }, [searchQuery, selectedClass, students]);
 
   // Handle Android Back Button
   useEffect(() => {
     const backHandler = BackHandler.addEventListener("hardwareBackPress", () => {
       if (isSidebarOpen) {
-        toggleSidebar();
+        setIsSidebarOpen(false);
         return true;
       }
-      return false; // Default back behavior
+      navigation.navigate('TeacherDash');
+      return true;
     });
     return () => backHandler.remove();
   }, [isSidebarOpen]);
 
-  const toggleSidebar = () => {
-    const isOpen = isSidebarOpen;
-    Animated.parallel([
-      Animated.timing(slideAnim, { toValue: isOpen ? -SIDEBAR_WIDTH : 0, duration: 300, useNativeDriver: true }),
-      Animated.timing(overlayAnim, { toValue: isOpen ? 0 : 0.5, duration: 300, useNativeDriver: true }),
-    ]).start();
-    setIsSidebarOpen(!isOpen);
+  const fetchDirectory = async () => {
+    try {
+      const response = await api.get('/teacher/students');
+      const data = response.data;
+      
+      setStudents(data);
+
+      // Extract unique classes for the dropdown
+      const uniqueClasses = [...new Set(data.map(s => s.className))].sort();
+      setClassOptions(["All Classes", ...uniqueClasses]);
+      
+    } catch (error) {
+      console.error("Fetch Directory Error:", error);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleNav = (screen) => {
-    toggleSidebar();
-    navigation.navigate(screen);
+  const filterData = () => {
+    let result = students;
+
+    // 1. Filter by Class
+    if (selectedClass !== "All Classes") {
+      result = result.filter(s => s.className === selectedClass);
+    }
+
+    // 2. Filter by Search (Name or Roll No)
+    if (searchQuery) {
+      const lowerQuery = searchQuery.toLowerCase();
+      result = result.filter(s => 
+        s.name.toLowerCase().includes(lowerQuery) || 
+        (s.rollNo && s.rollNo.toString().includes(lowerQuery))
+      );
+    }
+
+    setFilteredStudents(result);
   };
 
   const toggleDropdown = () => {
@@ -143,148 +110,70 @@ export default function StudentDirectoryScreen({ navigation }) {
     toggleDropdown();
   };
 
-  const handleLogout = async () => {
-    try {
-      await AsyncStorage.multiRemove(["token", "user", "role"]);
-      navigation.replace("Login", { skipAnimation: true });
-    } catch (error) {
-      console.log("Logout error:", error);
-    }
+  // Helper to generate initials and colors dynamically
+  const getAvatarProps = (name) => {
+    const initials = name ? name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() : "??";
+    // Simple logic to generate consistent colors based on name length
+    const colors = [
+        { bg: '#eef2ff', text: '#4f46e5' }, // Indigo
+        { bg: '#f0fdf4', text: '#16a34a' }, // Green
+        { bg: '#fff7ed', text: '#f97316' }, // Orange
+        { bg: '#f8fafc', text: '#475569' }, // Slate
+        { bg: '#fefce8', text: '#ca8a04' }, // Yellow
+    ];
+    const index = name.length % colors.length;
+    return { initials, ...colors[index] };
   };
 
-  const renderStudentCard = ({ item }) => (
-    <TouchableOpacity 
-      style={styles.card} 
-      activeOpacity={0.7}
-      onPress={() => navigation.navigate('TStudentDetail', { studentId: item.id })}
-    >
-      <View style={styles.cardLeft}>
-        <View style={[styles.avatarBox, { backgroundColor: item.initialsBg }]}>
-          <Text style={[styles.avatarText, { color: item.initialsColor }]}>{item.initials}</Text>
+  const renderStudentCard = ({ item }) => {
+    const { initials, bg, text } = getAvatarProps(item.name);
+    // Use stats if available, else 0%
+    const avgScore = item.stats?.avgScore ? Math.round(item.stats.avgScore) + "%" : "0%";
+
+    return (
+      <TouchableOpacity 
+        style={styles.card} 
+        activeOpacity={0.7}
+        onPress={() => navigation.navigate('TStudentDetail', { studentId: item._id })}
+      >
+        <View style={styles.cardLeft}>
+          <View style={[styles.avatarBox, { backgroundColor: bg }]}>
+            <Text style={[styles.avatarText, { color: text }]}>{initials}</Text>
+          </View>
+          <View>
+            <Text style={styles.studentName}>{item.name}</Text>
+            <Text style={styles.studentInfo}>Roll {item.rollNo || '-'} • {item.className}</Text>
+          </View>
         </View>
-        <View>
-          <Text style={styles.studentName}>{item.name}</Text>
-          <Text style={styles.studentInfo}>Roll {item.roll} • {item.className}</Text>
+        
+        <View style={styles.cardRight}>
+          <View style={[styles.avgBadge, { backgroundColor: '#f8fafc' }]}>
+            <Text style={[styles.avgText, { color: '#64748b' }]}>Avg {avgScore}</Text>
+          </View>
+          <FontAwesome5 name="chevron-right" size={12} color="#cbd5e1" />
         </View>
-      </View>
-      
-      <View style={styles.cardRight}>
-        <View style={[styles.avgBadge, { backgroundColor: item.bg }]}>
-          <Text style={[styles.avgText, { color: item.statusColor }]}>Avg {item.avg}</Text>
-        </View>
-        <FontAwesome5 name="chevron-right" size={12} color="#cbd5e1" />
-      </View>
-    </TouchableOpacity>
-  );
+      </TouchableOpacity>
+    );
+  };
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#fff" />
 
-      {/* --- SIDEBAR OVERLAY --- */}
-      <Animated.View
-        style={[styles.overlay, { opacity: overlayAnim }]}
-        pointerEvents={isSidebarOpen ? "auto" : "none"}
-      >
-        <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={toggleSidebar} />
-      </Animated.View>
-
-      {/* --- SIDEBAR DRAWER (Z-Index 51) --- */}
-      <Animated.View style={[styles.sidebar, { transform: [{ translateX: slideAnim }] }]}>
-        <View style={styles.sidebarContainer}>
-          <View style={{ flex: 1 }}>
-            {/* Sidebar Header */}
-            <View style={styles.sidebarHeader}>
-              <Image 
-                source={{ uri: "https://i.pravatar.cc/150?img=5" }} 
-                style={styles.profilePic} 
-              />
-              <View>
-                <Text style={styles.teacherName}>Priya Sharma</Text>
-                <Text style={styles.teacherCode}>T-2025-08</Text>
-              </View>
-              <View style={styles.classTag}>
-                <Text style={styles.classTagText}>Class Teacher: 9-A</Text>
-              </View>
-            </View>
-
-            {/* Navigation Items (Corrected Teacher Menu) */}
-            <ScrollView style={styles.menuScroll} showsVerticalScrollIndicator={false}>
-              <SidebarItem 
-                icon="chart-pie" 
-                label="Dashboard" 
-                onPress={() => handleNav('TeacherDash')}
-              />
-              <SidebarItem 
-                icon="calendar-check" 
-                label="Daily Tasks" 
-                onPress={() => handleNav('DailyTask')}
-              />
-              <SidebarItem 
-                icon="chalkboard-teacher" 
-                label="My Classes" 
-                onPress={() => handleNav('MyClasses')}
-              />
-              <SidebarItem 
-                icon="users" 
-                label="Student Directory" 
-                onPress={() => handleNav('StudentDirectory')}
-                active={true}
-              />
-              
-              <View style={styles.menuDivider} />
-              <Text style={styles.menuSectionLabel}>CONTENT & GRADING</Text>
-
-              <SidebarItem 
-                icon="list-ul" 
-                label="Quiz Manager" 
-                onPress={() => handleNav('QuizDashboard')}
-              />
-              <SidebarItem 
-                icon="pen-fancy" 
-                label="Handwriting Review" 
-                onPress={() => handleNav('HandwritingReview')}
-              />
-              <SidebarItem 
-                icon="headphones" 
-                label="Audio Review" 
-                onPress={() => handleNav('AudioReview')}
-              />
-              <SidebarItem 
-                icon="bullhorn" 
-                label="Notice Board" 
-                onPress={() => handleNav('NoticeBoard')}
-              />
-              <SidebarItem 
-                icon="folder-open" 
-                label="Resource Library" 
-                onPress={() => handleNav('ResourceLibrary')}
-              />
-
-              <View style={styles.menuDivider} />
-              <SidebarItem icon="question-circle" label="Help & Support" />
-            </ScrollView>
-          </View>
-
-          {/* Footer */}
-          <View style={styles.sidebarFooter}>
-            <TouchableOpacity style={styles.settingsBtn} onPress={() => handleNav('TeacherSetting')}>
-              <FontAwesome5 name="cog" size={16} color="#64748b" />
-              <Text style={styles.settingsText}>Settings</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
-              <FontAwesome5 name="sign-out-alt" size={16} color="#ef4444" />
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Animated.View>
+      {/* --- SIDEBAR COMPONENT --- */}
+      <TeacherSidebar 
+        isOpen={isSidebarOpen}
+        onClose={() => setIsSidebarOpen(false)}
+        navigation={navigation}
+        activeItem="StudentDirectory"
+      />
 
       {/* --- MAIN CONTENT --- */}
       <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
         
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity onPress={toggleSidebar} style={styles.menuButton}>
+          <TouchableOpacity onPress={() => setIsSidebarOpen(true)} style={styles.menuButton}>
             <FontAwesome5 name="bars" size={20} color="#334155" />
           </TouchableOpacity>
           <View>
@@ -319,10 +208,10 @@ export default function StudentDirectoryScreen({ navigation }) {
               
               {isDropdownOpen && (
                 <View style={styles.dropdownList}>
-                  {CLASS_OPTIONS.map((option, index) => (
+                  {classOptions.map((option, index) => (
                     <TouchableOpacity 
                       key={index} 
-                      style={[styles.dropdownItem, index !== CLASS_OPTIONS.length - 1 && styles.dropdownItemBorder]}
+                      style={[styles.dropdownItem, index !== classOptions.length - 1 && styles.dropdownItemBorder]}
                       onPress={() => selectClass(option)}
                     >
                       <Text style={[styles.dropdownItemText, selectedClass === option && { color: '#4f46e5', fontWeight: 'bold' }]}>
@@ -337,13 +226,20 @@ export default function StudentDirectoryScreen({ navigation }) {
           </View>
 
           {/* 2. List */}
-          <FlatList
-            data={STUDENTS}
-            keyExtractor={item => item.id}
-            renderItem={renderStudentCard}
-            contentContainerStyle={{ paddingBottom: 100 }}
-            showsVerticalScrollIndicator={false}
-          />
+          {loading ? (
+            <ActivityIndicator size="large" color="#4f46e5" style={{ marginTop: 20 }} />
+          ) : (
+            <FlatList
+              data={filteredStudents}
+              keyExtractor={item => item._id}
+              renderItem={renderStudentCard}
+              contentContainerStyle={{ paddingBottom: 100 }}
+              showsVerticalScrollIndicator={false}
+              ListEmptyComponent={
+                <Text style={{ textAlign: 'center', marginTop: 20, color: '#94a3b8' }}>No students found.</Text>
+              }
+            />
+          )}
         </View>
 
         {/* BOTTOM NAV */}
@@ -358,7 +254,7 @@ export default function StudentDirectoryScreen({ navigation }) {
             <Text style={styles.navLabel}>Classes</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.navItem}>
+          <TouchableOpacity style={styles.navItem} onPress={() => navigation.navigate('StudentDirectory')}>
             <FontAwesome5 name="users" size={20} color="#4f46e5" />
             <Text style={[styles.navLabel, { color: '#4f46e5' }]}>Students</Text>
           </TouchableOpacity>
@@ -369,41 +265,9 @@ export default function StudentDirectoryScreen({ navigation }) {
   );
 }
 
-/* --- SUB-COMPONENTS --- */
-const SidebarItem = ({ icon, label, onPress, active }) => (
-  <TouchableOpacity style={[styles.sidebarItem, active && styles.sidebarItemActive]} onPress={onPress}>
-    <FontAwesome5 name={icon} size={16} color={active ? "#4f46e5" : "#64748b"} style={{ width: 24 }} />
-    <Text style={[styles.sidebarItemText, active && { color: "#4f46e5", fontWeight: '700' }]}>{label}</Text>
-  </TouchableOpacity>
-);
-
-/* --- STYLES --- */
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F8FAFC" },
   safeArea: { flex: 1 },
-
-  /* Sidebar */
-  overlay: { position: "absolute", inset: 0, backgroundColor: "rgba(0,0,0,0.5)", zIndex: 50 },
-  sidebar: { position: "absolute", left: 0, top: 0, bottom: 0, width: SIDEBAR_WIDTH, backgroundColor: "#fff", zIndex: 51, elevation: 20 },
-  sidebarContainer: { flex: 1, paddingTop: Platform.OS === 'ios' ? 50 : 20, paddingHorizontal: 20, paddingBottom: 20, justifyContent: 'space-between' },
-  sidebarHeader: { marginBottom: 10,paddingBottom: 20,borderBottomWidth: 1, borderBottomColor: '#F1F5F9',flexDirection: 'column', gap: 12},
-  profileRow: {flexDirection: 'row',alignItems: 'center',gap: 12},
-  profilePic: { width: 50, height: 50, borderRadius: 25, borderWidth: 1, borderColor: '#e2e8f0' },
-  teacherName: { fontSize: 16, fontWeight: 'bold', color: '#1e293b' },
-  teacherCode: { fontSize: 12, color: '#64748b' },
-  classTag: { marginTop: 0, alignSelf: 'flex-start',  backgroundColor: '#eef2ff', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20, marginLeft: 62 },
-  classTagText: { fontSize: 10, fontWeight: 'bold', color: '#4f46e5', textTransform: 'uppercase' },
-  menuScroll: { marginTop: 20, flex: 1 },
-  menuDivider: { height: 1, backgroundColor: '#f1f5f9', marginVertical: 10 },
-  menuSectionLabel: { fontSize: 10, fontWeight: 'bold', color: '#94a3b8', marginBottom: 8, marginLeft: 12, letterSpacing: 0.5 },
-  sidebarItem: { flexDirection: 'row', alignItems: 'center', padding: 12, borderRadius: 12 },
-  sidebarItemActive: { backgroundColor: '#eef2ff' },
-  sidebarItemText: { fontSize: 14, fontWeight: '600', color: '#64748b' },
-  sidebarFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 10, borderTopWidth: 1, borderTopColor: '#f1f5f9' },
-  footerRow: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', alignItems: 'center', paddingHorizontal: 10 },
-  settingsBtn: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  settingsText: { fontSize: 14, fontWeight: '600', color: '#64748b' },
-  logoutBtn: { padding: 8, backgroundColor: '#fef2f2', borderRadius: 8 },
 
   /* Header */
   header: { flexDirection: 'row', alignItems: 'center', gap: 15, paddingHorizontal: 20, paddingVertical: 16, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
@@ -415,7 +279,7 @@ const styles = StyleSheet.create({
   mainContainer: { flex: 1, padding: 16 },
 
   /* Filter Section */
-  filterSection: { marginBottom: 16, zIndex: 20 }, // High Z-Index for Dropdown
+  filterSection: { marginBottom: 16, zIndex: 20 }, 
   searchBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 12, paddingHorizontal: 12, height: 48, marginBottom: 12 },
   searchInput: { flex: 1, marginLeft: 10, fontSize: 14, fontWeight: '600', color: '#1e293b' },
   

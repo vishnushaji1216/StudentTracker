@@ -239,3 +239,29 @@ export const deleteNotice = async (req, res) => {
     res.status(500).json({ message: "Failed to delete notice" });
   }
 };
+
+// --- 8. GET STUDENT DIRECTORY ---
+export const getDirectory = async (req, res) => {
+  try {
+    const teacherId = req.user.id;
+    const teacher = await Teacher.findById(teacherId);
+
+    if (!teacher) return res.status(404).json({ message: "Teacher not found!" });
+
+    const primaryClass = teacher.classTeachership;
+    // Ensure assignments exists to prevent crash if undefined
+    const assignedClasses = teacher.assignments ? teacher.assignments.map(a => a.class) : [];
+
+    const allClassNames = [...new Set([primaryClass, ...assignedClasses].filter(Boolean))];
+
+    // FIX: Changed 'classname' to 'className' to match your Model
+    const students = await Student.find({ className: { $in: allClassNames } })
+      .select('-password')
+      .sort({ className: 1, rollNo: 1 });
+    
+    res.status(200).json(students);
+  } catch (error) {
+    console.error("Directory error: ", error);
+    res.status(500).json({ message: "Failed to fetch student directory" });
+  }
+};
