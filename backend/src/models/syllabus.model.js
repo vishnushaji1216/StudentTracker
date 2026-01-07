@@ -16,6 +16,10 @@ const ChapterSchema = new mongoose.Schema({
     enum: ['Pending', 'Done'], 
     default: 'Pending' 
   },
+  isCompleted: { 
+    type: Boolean, 
+    default: false 
+  },
   
   // To identify the active topic on the Dashboard
   isCurrent: { type: Boolean, default: false }

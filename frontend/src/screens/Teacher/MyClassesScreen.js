@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import {
   View,
   Text,
@@ -10,13 +10,14 @@ import {
   Platform,
   LayoutAnimation,
   UIManager,
-  ActivityIndicator, // Added for loading state
+  ActivityIndicator,
   Alert
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useFocusEffect } from "@react-navigation/native"; // <--- 1. IMPORT THIS
 import FontAwesome5 from "react-native-vector-icons/FontAwesome5";
 import TeacherSidebar from "../../components/TeacherSidebar"; 
-import api from "../../services/api"; // 1. Import API
+import api from "../../services/api"; 
 
 // Enable LayoutAnimation on Android
 if (Platform.OS === 'android') {
@@ -30,7 +31,7 @@ export default function MyClassesScreen({ navigation }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [expandedId, setExpandedId] = useState(null);
 
-  // --- 2. NEW STATE FOR DATA ---
+  // Data State
   const [classesData, setClassesData] = useState([]);
   const [summary, setSummary] = useState({ totalStudents: 0, totalClasses: 0 });
   const [isLoading, setIsLoading] = useState(true);
@@ -48,14 +49,20 @@ export default function MyClassesScreen({ navigation }) {
     return () => backHandler.remove();
   }, [isSidebarOpen]);
 
-  // --- 3. FETCH DATA ON MOUNT ---
-  useEffect(() => {
-    fetchClasses();
-  }, []);
+  // --- 2. REPLACED useEffect WITH useFocusEffect ---
+  useFocusEffect(
+    useCallback(() => {
+      // This runs every time the screen comes into focus
+      fetchClasses();
+    }, [])
+  );
 
   const fetchClasses = async () => {
+    // We don't want to set loading to true every time we go back, 
+    // or it will flash the spinner. Let's keep it subtle or only do it on first load.
+    // setIsLoading(true); <--- Optional: Comment this out for smoother UX
+    
     try {
-      // Assuming your teacher routes are mounted at '/teachers' in server.js
       const response = await api.get('/teacher/classes');
       
       if (response.data) {
@@ -64,7 +71,7 @@ export default function MyClassesScreen({ navigation }) {
       }
     } catch (error) {
       console.error("Error fetching classes:", error);
-      Alert.alert("Error", "Could not load class data.");
+      // Fail silently on refetch to avoid annoying alerts on every back nav
     } finally {
       setIsLoading(false);
     }
@@ -76,7 +83,11 @@ export default function MyClassesScreen({ navigation }) {
   };
 
   const navigateToClass = (classId) => {
-    navigation.navigate('TClassDetail', { classId });
+    // Find the correct subject for this class ID
+    const selectedClass = classesData.find(c => c.id === classId);
+    const subject = selectedClass ? selectedClass.subject : "General"; 
+    
+    navigation.navigate('TClassDetail', { classId, subject });
   };
 
   // --- LOADING VIEW ---
@@ -128,17 +139,15 @@ export default function MyClassesScreen({ navigation }) {
             <View style={styles.summaryCard}>
               <View>
                 <Text style={styles.summaryLabel}>TOTAL STUDENTS</Text>
-                {/* Display fetched total */}
                 <Text style={styles.summaryValue}>{summary.totalStudents}</Text>
               </View>
               <View style={{ alignItems: 'flex-end' }}>
-                {/* Display fetched count */}
                 <Text style={styles.summarySub}>Across {summary.totalClasses} Classes</Text>
                 <FontAwesome5 name="users" size={24} color="#fff" style={{ marginTop: 4, opacity: 0.9 }} />
               </View>
             </View>
 
-            {/* 2. CLASS TEACHER SECTION (Filtered from API data) */}
+            {/* 2. CLASS TEACHER SECTION */}
             <Text style={styles.sectionTitle}>PRIMARY RESPONSIBILITY</Text>
             
             {classesData.filter(c => c.isClassTeacher).length > 0 ? (
@@ -155,7 +164,7 @@ export default function MyClassesScreen({ navigation }) {
                 <Text style={styles.emptyText}>No primary class assigned.</Text>
             )}
 
-            {/* 3. SUBJECT TEACHER SECTION (Filtered from API data) */}
+            {/* 3. SUBJECT TEACHER SECTION */}
             <Text style={styles.sectionTitle}>SUBJECT CLASSES</Text>
             
             {classesData.filter(c => !c.isClassTeacher).length > 0 ? (

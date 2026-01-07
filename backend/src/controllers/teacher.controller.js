@@ -265,3 +265,80 @@ export const getDirectory = async (req, res) => {
     res.status(500).json({ message: "Failed to fetch student directory" });
   }
 };
+
+// --- 9. GET CLASS DETAILS (Roster + Active Topic) ---
+export const getClassDetail = async (req, res) => {
+  try {
+    const { classId, subject } = req.params; // We need both to find the right syllabus
+    const teacherId = req.user.id;
+
+    // A. Fetch Student Roster for this specific class
+    const students = await Student.find({ className: classId })
+      .select('name rollNo stats')
+      .sort({ rollNo: 1 });
+
+    // B. Fetch Syllabus to get "Current Topic" status
+    let syllabus = await Syllabus.findOne({ teacher: teacherId, className: classId, subject });
+    
+    // If no syllabus exists, return a default/empty structure
+    let currentChapter = {
+      title: "No Active Topic",
+      chapterNo: 0,
+      notesStatus: 'Pending',
+      quizStatus: 'Pending',
+      isCompleted: false
+    };
+
+    if (syllabus) {
+      const active = syllabus.chapters.find(c => c.isCurrent);
+      if (active) currentChapter = active;
+    }
+
+    res.status(200).json({
+      roster: students,
+      topic: currentChapter
+    });
+
+  } catch (error) {
+    console.error("Class Detail Error:", error);
+    res.status(500).json({ message: "Failed to load class details" });
+  }
+};
+
+// --- 10. UPDATE CLASS STATUS (Toggles) ---
+export const updateClassStatus = async (req, res) => {
+  try {
+    const { classId, subject } = req.params;
+    // Added 'chapterNo' to the destructured body
+    const { chapterNo, chapterTitle, notesStatus, quizStatus, isCompleted } = req.body;
+    const teacherId = req.user.id;
+
+    const syllabus = await Syllabus.findOne({ teacher: teacherId, className: classId, subject });
+
+    if (!syllabus) {
+      return res.status(404).json({ message: "Syllabus not found" });
+    }
+
+    const activeIndex = syllabus.chapters.findIndex(c => c.isCurrent);
+
+    if (activeIndex === -1) {
+       return res.status(404).json({ message: "No active chapter selected" });
+    }
+
+    // --- UPDATE LOGIC ---
+    if (chapterNo) syllabus.chapters[activeIndex].chapterNo = Number(chapterNo); // <--- NEW
+    if (chapterTitle) syllabus.chapters[activeIndex].title = chapterTitle;
+    
+    syllabus.chapters[activeIndex].notesStatus = notesStatus ? 'Done' : 'Pending';
+    syllabus.chapters[activeIndex].quizStatus = quizStatus ? 'Done' : 'Pending';
+    syllabus.chapters[activeIndex].isCompleted = isCompleted;
+
+    await syllabus.save();
+
+    res.status(200).json({ message: "Status updated", chapter: syllabus.chapters[activeIndex] });
+
+  } catch (error) {
+    console.error("Update Status Error:", error);
+    res.status(500).json({ message: "Failed to update status" });
+  }
+};
