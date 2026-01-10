@@ -3,6 +3,8 @@ import Student from "../models/student.model.js";
 import Syllabus from "../models/syllabus.model.js";
 import Assignment from "../models/assignment.model.js";
 import Announcement from "../models/announcement.model.js";
+import Submission from"../models/submission.model.js";
+import Quiz from "../models/quiz.model.js";
 
 // --- 1. GET TEACHER'S CLASSES & PROFILE ---
 export const getTeacherProfile = async (req, res) => {
@@ -340,5 +342,131 @@ export const updateClassStatus = async (req, res) => {
   } catch (error) {
     console.error("Update Status Error:", error);
     res.status(500).json({ message: "Failed to update status" });
+  }
+};
+
+export const getQuizDashboard = async (req,res) => {
+  try {
+    const teacherId = req.user.id;
+
+    const quizzes = await Assignment.find({ teacher: teacherId, type: 'quiz'})
+    .populate('quizId', 'totalMarks questions')
+    .sort({ createdAt: -1});
+
+    const dashboardData = await Promise.all(quizzes.map(async(q) => {
+      const submittedCount = await Submission.countDocuments({ assignment: q._id });
+
+      let computedStatus = q.status;
+      const now = new Date();
+
+      if (q.status === 'Active' && q.dueDate && now > q.dueDate) {
+          computedStatus = 'Completed';
+
+          if(q.status !== 'Completed'){
+            q.status = 'Completed';
+            await q.save();
+          }
+      }
+
+      return {
+        _id: q._id,
+        title: q.title,
+        className: q.className,
+        subject: q.subject,
+        status: computedStatus,
+        scheduledAt: q.dueDate,
+        duration: q.duration,
+        questionCount: q.quizId ? q.quizId.questions.length : 0,
+        submittedCount: submittedCount,
+      };
+    }));
+
+    res.status(200).json(dashboardData);
+
+  } catch (error) {
+    console.error("Quiz Dashboard Error: ",error)
+    res.status(500).json({ message:"Failed to load quiz dashboard"});
+  }
+};
+
+export const createQuiz = async (req, res) => {
+  try {
+    const {
+      title,
+      className,
+      subject,
+      releaseType,
+      scheduleDate,
+      scheduleTime,
+      duration,
+      passingScore,
+      questions
+    } = req.body;
+
+    const teacherId = req.user.id;
+
+    // A. VALIDATION
+    if (!questions || questions.length === 0) {
+      return res.status(400).json({
+        message: "Quiz must have at least one question."
+      });
+    }
+
+    // B. CREATE CONTENT
+    const calculatedTotal = questions.reduce(
+      (sum, q) => sum + (Number(q.marks) || 1),
+      0
+    );
+
+    const newQuiz = new Quiz({
+      teacher: teacherId,
+      title: `${title} [${className}]`,
+      questions,
+      totalMarks: calculatedTotal
+    });
+
+    const savedQuiz = await newQuiz.save();
+
+    // C. CALCULATE TIMINGS
+    let startAt = new Date();
+
+    if (releaseType === "Later" && scheduleDate && scheduleTime) {
+      const parsedDate = new Date(`${scheduleDate}T${scheduleTime}:00`);
+      if (!isNaN(parsedDate.getTime())) {
+        startAt = parsedDate;
+      }
+    }
+
+    const safeDuration = Number(duration) || 10;
+    const endAt = new Date(startAt.getTime() + safeDuration * 60000);
+
+    // D. CREATE EVENT
+    const newAssignment = new Assignment({
+      teacher: teacherId,
+      quizId: savedQuiz._id,
+      className,
+      subject: subject || "General",
+      title,
+      type: "quiz",
+      status: releaseType === "Now" ? "Active" : "Scheduled",
+      scheduledAt: startAt,
+      dueDate: endAt,
+      duration: safeDuration,
+      passingScore: Number(passingScore) || 40,
+      totalMarks: calculatedTotal
+    });
+
+    await newAssignment.save();
+
+    res.status(201).json({
+      message: "Quiz created successfully",
+      quizId: newAssignment._id,
+      status: newAssignment.status
+    });
+  } catch (error) {
+    console.error("Create Quiz Error:", error);
+    res.status(500).json({
+      message: "Failed to create quiz"
+    });
   }
 };
