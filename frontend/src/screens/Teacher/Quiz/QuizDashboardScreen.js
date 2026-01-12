@@ -15,9 +15,12 @@ export default function QuizDashboardScreen({ navigation }) {
   const [activeTab, setActiveTab] = useState('Active'); 
   const fadeAnim = useRef(new Animated.Value(1)).current;
 
-  // --- 1. TOAST STATE ---
+  // --- TOAST & CONFIRM STATES ---
   const [toast, setToast] = useState({ visible: false, message: '', type: 'success' });
   const toastAnim = useRef(new Animated.Value(100)).current; 
+  
+  // New State for Delete Confirmation
+  const [deleteConfirm, setDeleteConfirm] = useState(null); // Stores { id, title } if active
 
   useFocusEffect(
     useCallback(() => {
@@ -42,7 +45,7 @@ export default function QuizDashboardScreen({ navigation }) {
     Animated.timing(fadeAnim, { toValue: 1, duration: 300, useNativeDriver: true }).start();
   };
 
-  // --- 2. TOAST HELPER ---
+  // --- HELPERS ---
   const showToast = (message, type = 'success') => {
     setToast({ visible: true, message, type });
     Animated.spring(toastAnim, { toValue: 0, useNativeDriver: true, friction: 8 }).start();
@@ -53,56 +56,72 @@ export default function QuizDashboardScreen({ navigation }) {
     }, 2000);
   };
 
-  // --- 3. UPDATED HANDLERS ---
+  // --- DELETE LOGIC ---
   
+  // 1. User clicks Trash Icon -> Show Confirmation
   const handleDelete = (id, title) => {
-    // We keep Alert here because we need user confirmation (Yes/No)
-    Alert.alert(
-      "Delete Quiz?",
-      `Are you sure you want to delete "${title}"?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        { 
-          text: "Delete", 
-          style: "destructive", 
-          onPress: async () => {
-            try {
-              await api.delete(`/teacher/assignments/${id}`);
-              setQuizzes(prev => prev.filter(q => q._id !== id));
-              showToast("Quiz deleted successfully", "success"); // <--- TOAST
-            } catch (err) {
-              showToast("Failed to delete quiz", "error"); // <--- TOAST
-            }
-          }
-        }
-      ]
-    );
+    setDeleteConfirm({ id, title });
+  };
+
+  // 2. User clicks "Confirm" -> Actually Delete
+  const executeDelete = async () => {
+    if (!deleteConfirm) return;
+    const { id } = deleteConfirm;
+
+    // Close confirmation immediately
+    setDeleteConfirm(null);
+
+    try {
+      await api.delete(`/teacher/assignments/${id}`);
+      setQuizzes(prev => prev.filter(q => q._id !== id));
+      showToast("Quiz deleted successfully", "success");
+    } catch (err) {
+      showToast("Failed to delete quiz", "error");
+    }
   };
 
   const handleEdit = (quizId) => {
     navigation.navigate('QuizEdit', { quizId: quizId });
   };
 
-  const handleMonitor = () => {
+  const handleMonitor = (quizId) => {
     navigation.navigate('LiveQuizMonitor', { quizId: quizId });
   };
 
-  const getTimeRemaining = (dueDate) => {
-    if (!dueDate) return "No Date";
+  const getTimeRemaining = (quiz) => {
     const now = new Date();
-    const end = new Date(dueDate);
-    if (isNaN(end.getTime())) return "Invalid Date";
+    
+    // CASE A: Scheduled Quiz -> Show "Starts in..."
+    if (quiz.status === 'Scheduled' && quiz.scheduledAt) {
+        const start = new Date(quiz.scheduledAt);
+        const diff = start - now;
+        if (diff <= 0) return "Starting...";
+        
+        const minutes = Math.floor((diff / 1000) / 60);
+        const hours = Math.floor(minutes / 60);
+        const days = Math.floor(hours / 24);
 
-    const diff = end - now; 
-    if (diff <= 0) return "Ended";
-    
-    const minutes = Math.floor((diff / 1000) / 60);
-    const hours = Math.floor(minutes / 60);
-    
-    if (hours > 24) return `${Math.floor(hours / 24)}d left`;
-    if (hours > 0) return `${hours}h ${minutes % 60}m left`;
-    return `${minutes}m left`;
-  };
+        if (days > 0) return `Starts in ${days}d`;
+        if (hours > 0) return `Starts in ${hours}h`;
+        return `Starts in ${minutes}m`;
+    }
+
+    // CASE B: Active Quiz -> Show "Ends in..."
+    if (quiz.dueDate) {
+        const end = new Date(quiz.dueDate);
+        const diff = end - now;
+        if (diff <= 0) return "Ended";
+
+        const minutes = Math.floor((diff / 1000) / 60);
+        const hours = Math.floor(minutes / 60);
+        
+        if (hours > 24) return `${Math.floor(hours / 24)}d left`;
+        if (hours > 0) return `${hours}h ${minutes % 60}m left`;
+        return `${minutes}m left`;
+    }
+
+    return "No Date";
+};
 
   const filteredQuizzes = quizzes.filter(q => {
     if (activeTab === 'Active') return q.status === 'Active' || q.status === 'Scheduled';
@@ -133,7 +152,7 @@ export default function QuizDashboardScreen({ navigation }) {
             <View style={styles.infoItem}>
               <FontAwesome5 name="clock" size={12} color="#64748b" />
               <Text style={styles.infoText}>
-                 {isLive || item.status === 'Scheduled' ? getTimeRemaining(item.dueDate) : `${item.duration} min`}
+                {isLive || item.status === 'Scheduled' ? getTimeRemaining(item) : `${item.duration} min`}
               </Text>
             </View>
             <View style={styles.infoItem}>
@@ -153,12 +172,12 @@ export default function QuizDashboardScreen({ navigation }) {
              <FontAwesome5 name="edit" size={12} color="#64748b" />
              <Text style={styles.actionText}>Edit</Text>
           </TouchableOpacity>
-          {activeTab !== 'Draft' && (
-              <TouchableOpacity style={styles.actionBtn} onPress={() => handleMonitor(item._id)}>
-                 <FontAwesome5 name="chart-pie" size={12} color="#4f46e5" />
-                 <Text style={[styles.actionText, {color:'#4f46e5'}]}>Monitor</Text>
-              </TouchableOpacity>
-          )}
+          {activeTab !== 'Draft' && item.status === 'Active' && ( 
+            <TouchableOpacity style={styles.actionBtn} onPress={() => handleMonitor(item._id)}>
+                <FontAwesome5 name="chart-pie" size={12} color="#4f46e5" />
+                <Text style={[styles.actionText, {color:'#4f46e5'}]}>Monitor</Text>
+            </TouchableOpacity>
+        )}
         </View>
       </Animated.View>
     );
@@ -222,7 +241,27 @@ export default function QuizDashboardScreen({ navigation }) {
           <FontAwesome5 name="plus" size={20} color="#fff" />
         </TouchableOpacity>
 
-        {/* --- 4. TOAST UI COMPONENT --- */}
+        {/* --- CONFIRMATION TOAST (Interactive) --- */}
+        {deleteConfirm && (
+          <View style={styles.confirmOverlay}>
+             <View style={styles.confirmBox}>
+                 <View style={styles.confirmTextContainer}>
+                     <Text style={styles.confirmTitle}>Delete Quiz?</Text>
+                     <Text style={styles.confirmSub} numberOfLines={1}>"{deleteConfirm.title}" will be permanently removed.</Text>
+                 </View>
+                 <View style={styles.confirmActions}>
+                     <TouchableOpacity style={styles.cancelBtn} onPress={() => setDeleteConfirm(null)}>
+                         <Text style={styles.cancelText}>Cancel</Text>
+                     </TouchableOpacity>
+                     <TouchableOpacity style={styles.deleteConfirmBtn} onPress={executeDelete}>
+                         <Text style={styles.deleteConfirmText}>Delete</Text>
+                     </TouchableOpacity>
+                 </View>
+             </View>
+          </View>
+        )}
+
+        {/* --- SUCCESS/ERROR TOAST (Non-interactive) --- */}
         {toast.visible && (
           <Animated.View 
             style={[
@@ -282,6 +321,18 @@ const styles = StyleSheet.create({
   toast: { position: 'absolute', bottom: 100, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, paddingHorizontal: 20, borderRadius: 30, zIndex: 999, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 10 },
   toastSuccess: { backgroundColor: '#16a34a' },
   toastError: { backgroundColor: '#ef4444' },
-  toastInfo: { backgroundColor: '#3b82f6' }, // Blue for info
+  toastInfo: { backgroundColor: '#3b82f6' },
   toastText: { color: '#fff', fontWeight: 'bold', fontSize: 14 },
+
+  /* --- CONFIRMATION CARD STYLES --- */
+  confirmOverlay: { position: 'absolute', bottom: 30, left: 20, right: 20, alignItems: 'center', zIndex: 1000 },
+  confirmBox: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#fff', borderRadius: 16, padding: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 10, elevation: 10, width: '100%', borderWidth: 1, borderColor: '#f1f5f9' },
+  confirmTextContainer: { flex: 1, marginRight: 10 },
+  confirmTitle: { fontSize: 14, fontWeight: 'bold', color: '#1e293b' },
+  confirmSub: { fontSize: 12, color: '#64748b' },
+  confirmActions: { flexDirection: 'row', gap: 10 },
+  cancelBtn: { paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8, backgroundColor: '#f1f5f9' },
+  cancelText: { fontSize: 12, fontWeight: 'bold', color: '#64748b' },
+  deleteConfirmBtn: { paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8, backgroundColor: '#fee2e2' },
+  deleteConfirmText: { fontSize: 12, fontWeight: 'bold', color: '#ef4444' },
 });

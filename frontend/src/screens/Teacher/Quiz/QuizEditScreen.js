@@ -85,13 +85,11 @@ export default function QuizEditScreen({ route, navigation }) {
   };
 
   const handleDeleteQuestion = (index) => {
-    Alert.alert("Delete Question?", "This cannot be undone.", [
-      { text: "Cancel" },
-      { text: "Delete", style: 'destructive', onPress: () => {
-          const newQ = questions.filter((_, i) => i !== index);
-          setQuestions(newQ);
-      }}
-    ]);
+    // 1. Delete immediately (No Alert)
+    const newQ = questions.filter((_, i) => i !== index);
+    setQuestions(newQ);
+
+    showToast("Question deleted", "error"); 
   };
 
   const handleAddQuestion = () => {

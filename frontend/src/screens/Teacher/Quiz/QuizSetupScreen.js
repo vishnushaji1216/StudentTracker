@@ -18,6 +18,20 @@ export default function QuizSetupScreen({ navigation }) {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
 
+  //Toast
+  const [toast, setToast] = useState({ visible: false, message: '', type: 'error' });
+  const toastAnim = useRef(new Animated.Value(100)).current;
+
+  const showToast = (message) => {
+    setToast({ visible: true, message, type: 'error' });
+    Animated.spring(toastAnim, { toValue: 0, useNativeDriver: true }).start();
+    setTimeout(() => {
+        Animated.timing(toastAnim, { toValue: 100, duration: 300, useNativeDriver: true }).start(() => setToast(prev => ({ ...prev, visible: false })));
+    }, 2000);
+  };
+
+
+
   const onChangeDate = (event, selectedDate) => {
     setShowDatePicker(false);
     if (selectedDate) setDate(prev => {
@@ -40,7 +54,10 @@ export default function QuizSetupScreen({ navigation }) {
   const formatTime = (d) => d.toTimeString().slice(0, 5);
 
   const handleNext = () => {
-    if(!title.trim()) return alert("Please enter a quiz title");
+    if(!title.trim()) {
+        showToast("Please enter a Quiz Title");
+        return;
+    }
     
     // Convert current Date object to strings for the next screen
     const scheduleDate = formatDate(date);
@@ -143,6 +160,14 @@ export default function QuizSetupScreen({ navigation }) {
         </View>
 
       </SafeAreaView>
+
+      {toast.visible && (
+        <Animated.View style={[styles.toast, { transform: [{ translateY: toastAnim }] }]}>
+            <FontAwesome5 name="exclamation-circle" size={16} color="#fff" />
+            <Text style={styles.toastText}>{toast.message}</Text>
+        </Animated.View>
+    )}
+
     </View>
   );
 }
@@ -169,5 +194,7 @@ const styles = StyleSheet.create({
 
   footer: { padding: 20, borderTopWidth: 1, borderTopColor: '#f1f5f9' },
   nextBtn: { backgroundColor: '#4f46e5', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 16, borderRadius: 12 },
-  nextBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 14 }
+  nextBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 14 },
+  toast: { position: 'absolute', bottom: 100, alignSelf: 'center', flexDirection: 'row', gap: 10, alignItems:'center', backgroundColor: '#ef4444', paddingVertical: 12, paddingHorizontal: 20, borderRadius: 30, zIndex: 999, elevation: 10 },
+  toastText: { color: '#fff', fontWeight: 'bold', fontSize: 14 },
 });
