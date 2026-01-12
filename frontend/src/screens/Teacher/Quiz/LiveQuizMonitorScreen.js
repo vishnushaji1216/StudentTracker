@@ -1,23 +1,25 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
   View,
   Text,
   TouchableOpacity,
   StyleSheet,
-  ScrollView,
   StatusBar,
   Image,
   Animated,
   BackHandler,
   Platform,
-  LayoutAnimation,
   UIManager,
   FlatList,
-  Alert
+  Alert,
+  ActivityIndicator
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import FontAwesome5 from "react-native-vector-icons/FontAwesome5";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useFocusEffect } from "@react-navigation/native"; 
+import TeacherSidebar from "../../../components/TeacherSidebar";
+import api from "../../../services/api";
 
 // Enable Animations
 if (Platform.OS === 'android') {
@@ -26,86 +28,117 @@ if (Platform.OS === 'android') {
   }
 }
 
-const SIDEBAR_WIDTH = 280;
+export default function LiveQuizMonitorScreen({ route, navigation }) {
+  // GET ID FROM PARAMS
+  const { quizId } = route.params; 
 
-// Mock Data for Live Monitoring
-const LIVE_STUDENTS = [
-  { id: '1', name: 'Arjun Kumar', initials: 'AK', bg: '#dcfce7', color: '#16a34a', status: 'finished', score: '18/20' },
-  { id: '2', name: 'Diya Singh', initials: 'DS', bg: '#f1f5f9', color: '#64748b', status: 'working', progress: 'Q8 / Q10' },
-  { id: '3', name: 'Rohan Das', initials: 'RD', bg: '#f1f5f9', color: '#94a3b8', status: 'pending' },
-  { id: '4', name: 'Fatima Z.', initials: 'FZ', bg: '#dcfce7', color: '#16a34a', status: 'finished', score: '19/20' },
-  { id: '5', name: 'Gaurav M.', initials: 'GM', bg: '#f1f5f9', color: '#64748b', status: 'working', progress: 'Q5 / Q10' },
-  { id: '6', name: 'Karan Vohra', initials: 'KV', bg: '#f1f5f9', color: '#64748b', status: 'working', progress: 'Q9 / Q10' },
-];
-
-export default function LiveQuizMonitorScreen({ navigation }) {
-  // Sidebar State
-  const slideAnim = useRef(new Animated.Value(-SIDEBAR_WIDTH)).current;
-  const overlayAnim = useRef(new Animated.Value(0)).current;
+  // Sidebar State (Using your reusable component logic is better, but keeping yours if preferred)
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
+  // Data State
+  const [loading, setLoading] = useState(true);
+  const [quizData, setQuizData] = useState(null);
+  const [students, setStudents] = useState([]);
+  
   // Timer State
-  const [timeLeft, setTimeLeft] = useState(765); // 12m 45s in seconds
+  const [timeLeft, setTimeLeft] = useState(0); 
 
-  // Handle Android Back Button
-  useEffect(() => {
-    const backHandler = BackHandler.addEventListener("hardwareBackPress", () => {
-      if (isSidebarOpen) {
-        toggleSidebar();
-        return true;
+  // --- 1. FETCH DATA FUNCTION ---
+  const fetchData = async () => {
+    try {
+      const response = await api.get(`/teacher/quizzes/${quizId}`);
+      const q = response.data;
+      
+      setQuizData(q);
+      
+      // Calculate Time Left
+      if (q.dueDate) {
+        const now = new Date();
+        const end = new Date(q.dueDate);
+        const diffInSeconds = Math.floor((end - now) / 1000);
+        setTimeLeft(diffInSeconds > 0 ? diffInSeconds : 0);
       }
-      navigation.goBack();
-      return true;
-    });
-    return () => backHandler.remove();
-  }, [isSidebarOpen]);
 
-  // Timer Logic
+      // Map Submissions to UI structure
+      // Note: Backend 'submissions' array has { student: {name, rollNo}, status, obtainedMarks }
+      // We need to map this to your UI needs.
+      // Ideally, you'd want ALL students here. For now, we show only those who started.
+      // To show ALL, we'd need to fetch Class Roster and merge.
+      // Let's stick to submissions for now.
+      
+      const mappedStudents = q.submissions.map(sub => {
+        // Determine status color/bg logic
+        let status = 'working';
+        if (sub.status === 'submitted' || sub.status === 'graded') status = 'finished';
+        
+        // Progress (mock calculation if not in backend, or use sub.quizResponses.length)
+        // Let's assume backend sends populated submissions
+        const progress = sub.quizResponses ? `${sub.quizResponses.length} / ${q.questions.length}` : `0 / ${q.questions.length}`;
+
+        return {
+           id: sub._id,
+           name: sub.student.name,
+           initials: sub.student.name.substring(0,2).toUpperCase(),
+           rollNo: sub.student.rollNo,
+           bg: status === 'finished' ? '#dcfce7' : '#f1f5f9',
+           color: status === 'finished' ? '#16a34a' : '#64748b',
+           status: status,
+           score: `${sub.obtainedMarks}/${q.totalMarks}`,
+           progress: progress
+        };
+      });
+
+      setStudents(mappedStudents);
+
+    } catch (error) {
+      console.error("Monitor Error:", error);
+      Alert.alert("Error", "Failed to load live data");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // --- 2. INITIAL LOAD & AUTO REFRESH ---
+  useFocusEffect(
+    useCallback(() => {
+      fetchData(); // Load immediately
+
+      // Auto-refresh every 10 seconds
+      const interval = setInterval(fetchData, 10000);
+      return () => clearInterval(interval);
+    }, [quizId])
+  );
+
+  // --- 3. TIMER COUNTDOWN (Local) ---
   useEffect(() => {
+    if (timeLeft <= 0) return;
     const timer = setInterval(() => {
       setTimeLeft((prev) => (prev > 0 ? prev - 1 : 0));
     }, 1000);
     return () => clearInterval(timer);
-  }, []);
+  }, [timeLeft]);
 
   const formatTime = (seconds) => {
+    if (seconds <= 0) return "ENDED";
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
   };
 
-  const toggleSidebar = () => {
-    const isOpen = isSidebarOpen;
-    Animated.parallel([
-      Animated.timing(slideAnim, { toValue: isOpen ? -SIDEBAR_WIDTH : 0, duration: 300, useNativeDriver: true }),
-      Animated.timing(overlayAnim, { toValue: isOpen ? 0 : 0.5, duration: 300, useNativeDriver: true }),
-    ]).start();
-    setIsSidebarOpen(!isOpen);
-  };
-
-  const handleNav = (screen) => {
-    toggleSidebar();
-    navigation.navigate(screen);
-  };
-
-  const handleStopQuiz = () => {
+  const handleStopQuiz = async () => {
     Alert.alert(
       "End Quiz?",
-      "This will submit all active sessions immediately. Cannot be undone.",
+      "This will close the quiz for everyone.",
       [
         { text: "Cancel", style: "cancel" },
-        { text: "End Quiz", style: "destructive", onPress: () => navigation.navigate('QuizResult') }
+        { text: "End Quiz", style: "destructive", onPress: async () => {
+            try {
+                await api.put(`/teacher/quizzes/${quizId}`, { status: 'Completed' });
+                navigation.goBack();
+            } catch(e) { Alert.alert("Error ending quiz"); }
+        }}
       ]
     );
-  };
-
-  const handleLogout = async () => {
-    try {
-      await AsyncStorage.multiRemove(["token", "user", "role"]);
-      navigation.replace("Login", { skipAnimation: true });
-    } catch (error) {
-      console.log("Logout error:", error);
-    }
   };
 
   const renderStudentRow = ({ item }) => {
@@ -115,135 +148,45 @@ export default function LiveQuizMonitorScreen({ navigation }) {
           <View style={[styles.avatarBox, { backgroundColor: item.bg }]}>
             <Text style={[styles.avatarText, { color: item.color }]}>{item.initials}</Text>
           </View>
-          <Text style={styles.studentName}>{item.name}</Text>
+          <View>
+             <Text style={styles.studentName}>{item.name}</Text>
+             <Text style={{fontSize:10, color:'#94a3b8'}}>Roll No: {item.rollNo}</Text>
+          </View>
         </View>
 
         <View style={styles.cardRight}>
-          {item.status === 'finished' && (
+          {item.status === 'finished' ? (
             <View style={styles.statusBox}>
-              <Text style={[styles.statusText, { color: '#64748b' }]}>Finished ({item.score})</Text>
+              <Text style={[styles.statusText, { color: '#16a34a' }]}>Finished ({item.score})</Text>
             </View>
-          )}
-
-          {item.status === 'working' && (
+          ) : (
             <View style={styles.workingBox}>
               <View style={styles.pulseContainer}>
                 <PulsingDot />
-                <Text style={styles.workingText}>Writing...</Text>
+                <Text style={styles.workingText}>Live</Text>
               </View>
               <Text style={styles.progressText}>{item.progress}</Text>
             </View>
-          )}
-
-          {item.status === 'pending' && (
-            <Text style={styles.pendingText}>Not Started</Text>
           )}
         </View>
       </View>
     );
   };
 
+  if (loading) {
+      return <View style={[styles.container, {justifyContent:'center'}]}><ActivityIndicator size="large" color="#4f46e5"/></View>;
+  }
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#4f46e5" />
-
-      {/* --- SIDEBAR OVERLAY --- */}
-      <Animated.View
-        style={[styles.overlay, { opacity: overlayAnim }]}
-        pointerEvents={isSidebarOpen ? "auto" : "none"}
-      >
-        <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={toggleSidebar} />
-      </Animated.View>
-
-      {/* --- SIDEBAR DRAWER (Z-Index 51) --- */}
-      <Animated.View style={[styles.sidebar, { transform: [{ translateX: slideAnim }] }]}>
-        <View style={styles.sidebarContainer}>
-          <View style={{ flex: 1 }}>
-            {/* Sidebar Header */}
-            <View style={styles.sidebarHeader}>
-              <Image 
-                source={{ uri: "https://i.pravatar.cc/150?img=5" }} 
-                style={styles.profilePic} 
-              />
-              <View>
-                <Text style={styles.teacherName}>Priya Sharma</Text>
-                <Text style={styles.teacherCode}>T-2025-08</Text>
-              </View>
-              <View style={styles.classTag}>
-                <Text style={styles.classTagText}>Class Teacher: 9-A</Text>
-              </View>
-            </View>
-
-            {/* Navigation Items (Corrected Teacher Menu) */}
-            <ScrollView style={styles.menuScroll} showsVerticalScrollIndicator={false}>
-              <SidebarItem 
-                icon="chart-pie" 
-                label="Dashboard" 
-                onPress={() => handleNav('TeacherDash')}
-              />
-              <SidebarItem 
-                icon="calendar-check" 
-                label="Daily Tasks" 
-                onPress={() => handleNav('DailyTask')}
-              />
-              <SidebarItem 
-                icon="chalkboard-teacher" 
-                label="My Classes" 
-                onPress={() => handleNav('MyClasses')}
-              />
-              <SidebarItem 
-                icon="users" 
-                label="Student Directory" 
-                onPress={() => handleNav('StudentDirectory')}
-              />
-              
-              <View style={styles.menuDivider} />
-              <Text style={styles.menuSectionLabel}>CONTENT & GRADING</Text>
-
-              <SidebarItem 
-                icon="list-ul" 
-                label="Quiz Manager" 
-                onPress={() => handleNav('QuizDashboard')}
-                active={true}
-              />
-              <SidebarItem 
-                icon="pen-fancy" 
-                label="Handwriting Review" 
-                onPress={() => handleNav('HandwritingReview')}
-              />
-              <SidebarItem 
-                icon="headphones" 
-                label="Audio Review" 
-                onPress={() => handleNav('AudioReview')}
-              />
-              <SidebarItem 
-                icon="bullhorn" 
-                label="Notice Board" 
-                onPress={() => handleNav('NoticeBoard')}
-              />
-              <SidebarItem 
-                icon="folder-open" 
-                label="Resource Library" 
-                onPress={() => handleNav('ResourceLibrary')}
-              />
-
-              <View style={styles.menuDivider} />
-              <SidebarItem icon="question-circle" label="Help & Support" />
-            </ScrollView>
-          </View>
-
-          {/* Footer */}
-          <View style={styles.sidebarFooter}>
-            <TouchableOpacity style={styles.settingsBtn} onPress={() => handleNav('TeacherSetting')}>
-              <FontAwesome5 name="cog" size={16} color="#64748b" />
-              <Text style={styles.settingsText}>Settings</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
-              <FontAwesome5 name="sign-out-alt" size={16} color="#ef4444" />
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Animated.View>
+      
+      <TeacherSidebar 
+        isOpen={isSidebarOpen} 
+        onClose={() => setIsSidebarOpen(false)} 
+        navigation={navigation} 
+        activeItem="QuizManager"
+      />
 
       {/* --- MAIN CONTENT --- */}
       <View style={styles.mainContent}>
@@ -259,11 +202,14 @@ export default function LiveQuizMonitorScreen({ navigation }) {
                 <Text style={styles.timerLabel}>TIME REMAINING</Text>
                 <Text style={styles.timerValue}>{formatTime(timeLeft)}</Text>
               </View>
+              <TouchableOpacity onPress={() => setIsSidebarOpen(true)}>
+                 <FontAwesome5 name="bars" size={20} color="rgba(255,255,255,0.8)" />
+              </TouchableOpacity>
             </View>
             
             <View style={styles.quizInfo}>
-              <Text style={styles.quizTitle}>Weekly Math Test</Text>
-              <Text style={styles.quizSub}>Class 9-A • 42 Students</Text>
+              <Text style={styles.quizTitle}>{quizData?.title || "Quiz Monitor"}</Text>
+              <Text style={styles.quizSub}>{quizData?.className} • {students.length} Active</Text>
             </View>
           </SafeAreaView>
         </View>
@@ -273,19 +219,20 @@ export default function LiveQuizMonitorScreen({ navigation }) {
           {/* Status Bar */}
           <View style={styles.statusHeader}>
             <Text style={styles.statusTitle}>LIVE STATUS</Text>
-            <TouchableOpacity style={styles.refreshBtn}>
+            <TouchableOpacity style={styles.refreshBtn} onPress={fetchData}>
               <FontAwesome5 name="sync-alt" size={10} color="#4f46e5" />
-              <Text style={styles.refreshText}>Auto-refresh</Text>
+              <Text style={styles.refreshText}>Refreshed just now</Text>
             </TouchableOpacity>
           </View>
 
           {/* Student List */}
           <FlatList 
-            data={LIVE_STUDENTS}
+            data={students}
             keyExtractor={item => item.id}
             renderItem={renderStudentRow}
             contentContainerStyle={{ paddingBottom: 100 }}
             showsVerticalScrollIndicator={false}
+            ListEmptyComponent={<Text style={{textAlign:'center', marginTop:50, color:'#94a3b8'}}>Waiting for students to join...</Text>}
           />
 
         </View>
@@ -340,7 +287,7 @@ const styles = StyleSheet.create({
 
   /* Sidebar */
   overlay: { position: "absolute", inset: 0, backgroundColor: "rgba(0,0,0,0.5)", zIndex: 50 },
-  sidebar: { position: "absolute", left: 0, top: 0, bottom: 0, width: SIDEBAR_WIDTH, backgroundColor: "#fff", zIndex: 51, elevation: 20 },
+  // sidebar: { position: "absolute", left: 0, top: 0, bottom: 0, width: SIDEBAR_WIDTH, backgroundColor: "#fff", zIndex: 51, elevation: 20 },
   sidebarContainer: { flex: 1, paddingTop: Platform.OS === 'ios' ? 50 : 20, paddingHorizontal: 20, paddingBottom: 20, justifyContent: 'space-between' },
   sidebarHeader: { marginBottom: 10,paddingBottom: 20,borderBottomWidth: 1, borderBottomColor: '#F1F5F9',flexDirection: 'column', gap: 12},
   profileRow: {flexDirection: 'row',alignItems: 'center',gap: 12},

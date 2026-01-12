@@ -6,7 +6,7 @@ import {
   TouchableOpacity, 
   StyleSheet, 
   ScrollView, 
-  Animated, // <--- Import Animated
+  Animated, 
   ActivityIndicator,
   Alert
 } from "react-native";
@@ -133,19 +133,65 @@ export default function QuestionBuilderScreen({ route, navigation }) {
     }
   };
 
+  const handleDraft = async () => {
+    setLoading(true);
+    try {
+      const payload = {
+        ...setupData,
+        questions:questions,
+        isDraft: true
+      };
+
+      await api.post('/teacher/quizzes', payload);
+      showToast("Saved as Draft", "info");
+      setTimeout(() => navigation.navigate('QuizDashboard'), 1000);
+
+    } catch (error) {
+      showToast("Failed to save draft", "error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <View style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
         
         {/* Header */}
         <View style={styles.header}>
-           <View>
-             <Text style={styles.headerTitle}>Add Questions</Text>
-             <Text style={styles.headerSub}>{questions.length} Questions Added • Total Marks: {questions.reduce((sum, q) => sum + q.marks, 0)}</Text>
+           {/* Title Section - Uses flex:1 to shrink if needed */}
+           <View style={{ flex: 1, paddingRight: 10 }}>
+             <Text style={styles.headerTitle} numberOfLines={1}>Add Questions</Text>
+             <Text style={styles.headerSub} numberOfLines={1}>
+               {questions.length} Added • {questions.reduce((sum, q) => sum + q.marks, 0)} Marks
+             </Text>
            </View>
-           <TouchableOpacity style={styles.publishBtn} onPress={handlePublish} disabled={loading}>
-              {loading ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.publishText}>Publish</Text>}
-           </TouchableOpacity>
+           
+           {/* Buttons Section - Fixed width, doesn't shrink */}
+           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+               
+               {/* 1. Draft Button (Icon Only) */}
+               <TouchableOpacity 
+                  style={styles.iconBtn} 
+                  onPress={handleDraft} 
+                  disabled={loading}
+               >
+                  <FontAwesome5 name="save" size={20} color="#64748b" />
+               </TouchableOpacity>
+
+               {/* 2. Publish Button (Text) */}
+               <TouchableOpacity 
+                  style={styles.publishBtn} 
+                  onPress={handlePublish} 
+                  disabled={loading}
+               >
+                  {loading ? (
+                    <ActivityIndicator color="#fff" size="small" />
+                  ) : (
+                    <Text style={styles.publishText}>Publish</Text>
+                  )}
+               </TouchableOpacity>
+           </View>
         </View>
 
         <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 100 }}>
@@ -231,6 +277,8 @@ const styles = StyleSheet.create({
   headerSub: { fontSize: 12, color: '#64748b' },
   publishBtn: { backgroundColor: '#16a34a', paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20 },
   publishText: { color: '#fff', fontWeight: 'bold' },
+  draftBtn: { backgroundColor: '#e2e8f0', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20 },
+  draftText: { color: '#475569', fontWeight: 'bold' },
   
   card: { backgroundColor: '#fff', padding: 20, borderRadius: 16, marginBottom: 20, borderWidth: 1, borderColor: '#e2e8f0' },
   row: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },

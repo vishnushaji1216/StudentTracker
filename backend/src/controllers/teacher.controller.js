@@ -129,7 +129,7 @@ export const createAssignment = async (req, res) => {
 export const getAssignments = async (req, res) => {
   try {
     const teacherId = req.user.id;
-    const assignments = await Assignment.find({ teacher: teacherId }).sort({ createdAt: -1 });
+    const assignments = await Assignment.find({ teacher: teacherId, status: { $ne: 'Draft' }}).sort({ createdAt: -1 });
     res.status(200).json(assignments);
   } catch (error) {
     res.status(500).json({ message: "Failed to fetch assignments" });
@@ -448,7 +448,7 @@ export const createQuiz = async (req, res) => {
       subject: subject || "General",
       title,
       type: "quiz",
-      status: releaseType === "Now" ? "Active" : "Scheduled",
+      status: req.body.isDraft? 'Draft' : (releaseType === "Now" ? "Active" : "Scheduled"),
       scheduledAt: startAt,
       dueDate: endAt,
       duration: safeDuration,
@@ -470,3 +470,59 @@ export const createQuiz = async (req, res) => {
     });
   }
 };
+
+export const getQuizDetail = async (req,res) => {
+  try {
+    const { id } = req.params;
+
+    const assignment = await Assignment.findById(id).populate('quizId');
+    if (!assignment) return res.status(404).json({ message: "Quiz not found!"});
+
+    const submission = await Submission.find({ assignment: id })
+    .populate('student', 'name rollNo')
+    .sort({ obtainedMarks: -1 });
+
+    res.json({
+      ...assignment.toObject(),
+      questions: assignment.quizId ? assignment.quizId.questions : [],
+      submissions: submission
+    });
+
+  } catch (error) {
+    console.error("Get Detail Error: ", error)
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const updateQuiz = async (req,res) => {
+  try {
+    const { id } = req.params;
+    const { title, duration, passingScore, questions, status } = req.body;
+
+    const assignment = await Assignment.findByIdAndUpdate(id, {
+      title, 
+      duration,
+      passingScore,
+      questions,
+      status,
+    }, { new:true});
+
+    if (assignment.quizId && questions) {
+      const newTotal = questions.reduce((sum, q) => sum + (Number(q.marks) || 1), 0);
+
+      await Quiz.findByIdAndUpdate(assignment.quizId, {
+        questions: questions,
+        totalMarks: newTotal
+      });
+
+      assignment.totalMarks = newTotal;
+      await assignment.save();
+    }
+
+    res.json({ message: "updated Successfully", assignment });
+
+  } catch (error) {
+    console.error("Update Error: ", error)
+    res.status(500).json({ message: "update failed"});
+  }
+}

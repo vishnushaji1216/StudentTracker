@@ -79,12 +79,12 @@ export default function QuizDashboardScreen({ navigation }) {
     );
   };
 
-  const handleEdit = () => {
-    showToast("Edit feature coming soon!", "info"); // <--- TOAST
+  const handleEdit = (quizId) => {
+    navigation.navigate('QuizEdit', { quizId: quizId });
   };
 
   const handleMonitor = () => {
-    showToast("Live Monitor available when students join", "info"); // <--- TOAST
+    navigation.navigate('LiveQuizMonitor', { quizId: quizId });
   };
 
   const getTimeRemaining = (dueDate) => {
@@ -149,12 +149,12 @@ export default function QuizDashboardScreen({ navigation }) {
         </View>
 
         <View style={styles.cardFooter}>
-          <TouchableOpacity style={styles.actionBtn} onPress={handleEdit}>
+          <TouchableOpacity style={styles.actionBtn} onPress={() => handleEdit(item._id)}>
              <FontAwesome5 name="edit" size={12} color="#64748b" />
              <Text style={styles.actionText}>Edit</Text>
           </TouchableOpacity>
           {activeTab !== 'Draft' && (
-              <TouchableOpacity style={styles.actionBtn} onPress={handleMonitor}>
+              <TouchableOpacity style={styles.actionBtn} onPress={() => handleMonitor(item._id)}>
                  <FontAwesome5 name="chart-pie" size={12} color="#4f46e5" />
                  <Text style={[styles.actionText, {color:'#4f46e5'}]}>Monitor</Text>
               </TouchableOpacity>

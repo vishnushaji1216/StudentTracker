@@ -35,6 +35,7 @@ import QuizSetupScreen from './src/screens/Teacher/Quiz/QuizSetupScreen';
 import QuestionBuilderScreen from './src/screens/Teacher/Quiz/QuestionBuilderScreen';
 import LiveQuizMonitorScreen from './src/screens/Teacher/Quiz/LiveQuizMonitorScreen';
 import QuizResultScreen from './src/screens/Teacher/Quiz/QuizResultScreen';
+import QuizEditScreen from './src/screens/Teacher/Quiz/QuizEditScreen';
 
 // Student
 import StudentDashScreen from './src/screens/Student/StudentDashScreen';
@@ -89,6 +90,7 @@ export default function App() {
         <Stack.Screen name="QuestionBuilder" component={QuestionBuilderScreen} />
         <Stack.Screen name="LiveQuizMonitor" component={LiveQuizMonitorScreen} />
         <Stack.Screen name="QuizResult" component={QuizResultScreen} />
+        <Stack.Screen name="QuizEdit" component={QuizEditScreen} />
 
         {/* Admin */}
         <Stack.Screen name="AdminDash" component={AdminDashScreen} />

@@ -12,7 +12,9 @@ import {
   getClassDetail,
   updateClassStatus,
   createQuiz,
-  getQuizDashboard
+  getQuizDashboard,
+  getQuizDetail,
+  updateQuiz
 } from "../controllers/teacher.controller.js";
 import auth from "../middleware/auth.middleware.js";
 
@@ -50,8 +52,10 @@ router.delete("/assignments/:id", auth, teacherCheck, deleteAssignment);
 /* =====================================================
    QUIZ ROUTES
 ===================================================== */
-router.post("/quizzes", auth, teacherCheck, createQuiz);
 router.get("/quizzes", auth, teacherCheck, getQuizDashboard);
+router.post("/quizzes", auth, teacherCheck, createQuiz);
+router.get("/quizzes/:id", auth, teacherCheck, getQuizDetail);
+router.put("/quizzes/:id", auth, teacherCheck, updateQuiz);
 
 /* =====================================================
    NOTICE ROUTES
