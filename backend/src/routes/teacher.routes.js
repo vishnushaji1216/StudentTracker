@@ -14,12 +14,19 @@ import {
   createQuiz,
   getQuizDashboard,
   getQuizDetail,
-  updateQuiz
+  updateQuiz,
 } from "../controllers/teacher.controller.js";
+import { 
+   logHandwritingReview, 
+   getHandwritingQueue 
+} from "../controllers/submission.controller.js";
 import auth from "../middleware/auth.middleware.js";
+import mutler from "multer";
+import multer from "multer";
 
 const router = express.Router();
 
+const upload = multer({ storage: multer.memoryStorage() });
 /* =====================================================
    TEACHER ROLE CHECK MIDDLEWARE
 ===================================================== */
@@ -68,5 +75,11 @@ router.delete("/notices/:id", auth, teacherCheck, deleteNotice);
    STUDENT DIRECTORY ROUTES
 ===================================================== */
 router.get("/students", auth, teacherCheck, getDirectory);
+
+/* =====================================================
+   SUBMISSION ROUTES
+===================================================== */
+router.post("/log/handwriting", auth, teacherCheck, upload.single("file"), logHandwritingReview);
+router.get("/queue/handwriting", auth, teacherCheck, getHandwritingQueue);
 
 export default router;

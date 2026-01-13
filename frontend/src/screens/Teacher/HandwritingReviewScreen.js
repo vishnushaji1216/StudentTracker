@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
   View,
   Text,
@@ -10,73 +10,119 @@ import {
   Animated,
   BackHandler,
   Platform,
-  LayoutAnimation,
-  UIManager,
   Dimensions,
-  TextInput
+  TextInput,
+  ActivityIndicator
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import FontAwesome5 from "react-native-vector-icons/FontAwesome5";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useFocusEffect } from "@react-navigation/native";
+import { Camera, useCameraDevice, useCameraPermission } from 'react-native-vision-camera';
 
-// Enable LayoutAnimation
-if (Platform.OS === 'android') {
-  if (UIManager.setLayoutAnimationEnabledExperimental) {
-    UIManager.setLayoutAnimationEnabledExperimental(true);
-  }
-}
+// 1. IMPORT SIDEBAR COMPONENT
+import TeacherSidebar from "../../components/TeacherSidebar";
+import api from "../../services/api"; 
 
-const SIDEBAR_WIDTH = 280;
 const { width, height } = Dimensions.get('window');
-
-// Mock Data
-const STUDENTS_QUEUE = [
-  { id: '1', name: 'Arjun Kumar', roll: '24', initials: 'AK', color: '#4f46e5', bg: '#eef2ff', status: 'pending' },
-  { id: '2', name: 'Diya Singh', roll: '25', initials: 'DS', color: '#64748b', bg: '#f1f5f9', status: 'pending' },
-  { id: '3', name: 'Karan Vohra', roll: '26', initials: 'KV', color: '#16a34a', bg: '#f0fdf4', status: 'logged', rating: 4 },
-  { id: '4', name: 'Rahul Singh', roll: '03', initials: 'RS', color: '#64748b', bg: '#f1f5f9', status: 'pending' },
-  { id: '5', name: 'Fatima Z.', roll: '27', initials: 'FZ', color: '#64748b', bg: '#f1f5f9', status: 'pending' },
-];
-
 const FEEDBACK_TAGS = ["Neat Work", "Improve Spacing", "Incomplete", "Check Spelling"];
 
 export default function HandwritingReviewScreen({ navigation }) {
+  // --- CAMERA HOOKS ---
+  const device = useCameraDevice('back');
+  const { hasPermission, requestPermission } = useCameraPermission();
+  const camera = useRef(null);
+
+  // --- STATE ---
+  const [studentQueue, setStudentQueue] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  
   // Sidebar State
-  const slideAnim = useRef(new Animated.Value(-SIDEBAR_WIDTH)).current;
-  const overlayAnim = useRef(new Animated.Value(0)).current;
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
-  // Screen State
-  const [activeTab, setActiveTab] = useState('pending');
-  const [selectedStudentId, setSelectedStudentId] = useState('1'); // For the top ribbon
+  // Toast State
+  const [toast, setToast] = useState({ visible: false, message: '', type: 'success' });
+  const toastAnim = useRef(new Animated.Value(100)).current;
 
-  // Capture Modal State
+  // Screen Logic
+  const [activeTab, setActiveTab] = useState('pending');
+  const [selectedStudentId, setSelectedStudentId] = useState(null);
+
+  // Capture Logic
   const [isCaptureOpen, setIsCaptureOpen] = useState(false);
-  const [captureStage, setCaptureStage] = useState('camera'); // 'camera' or 'grading'
+  const [captureStage, setCaptureStage] = useState('camera'); 
   const [currentStudent, setCurrentStudent] = useState(null);
+  const [photoPath, setPhotoPath] = useState(null);
   
-  // Grading Form State
+  // Grading Form
   const [selectedTags, setSelectedTags] = useState(['Neat Work']);
   const [rating, setRating] = useState(0);
-
-  // Animation for Grading Panel
+  const [comment, setComment] = useState("");
   const panelAnim = useRef(new Animated.Value(height)).current;
 
-  // Handle Android Back Button
+  // --- 1. PERMISSIONS ---
+  useEffect(() => {
+    if (!hasPermission) requestPermission();
+  }, [hasPermission]);
+
+  // --- 2. FETCH DATA ---
+  const fetchQueue = async () => {
+    setLoading(true);
+    try {
+      // DEBUG LOG: Check your terminal to see what the backend returns
+      console.log("Fetching Handwriting Queue...");
+      
+      const response = await api.get('/teacher/queue/handwriting');
+      
+      console.log("Queue Response Data:", response.data); // <--- LOOK HERE IN TERMINAL
+      
+      setStudentQueue(response.data);
+
+      if (response.data.length > 0 && !selectedStudentId) {
+        setSelectedStudentId(response.data[0].id);
+      }
+    } catch (error) {
+      console.error("Fetch Error:", error);
+      showToast("Failed to load queue", "error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchQueue();
+    }, [])
+  );
+
+  // --- 3. TOAST HELPER ---
+  const showToast = (message, type = 'success') => {
+    setToast({ visible: true, message, type });
+    Animated.spring(toastAnim, { toValue: 0, useNativeDriver: true, friction: 8 }).start();
+    setTimeout(() => {
+      Animated.timing(toastAnim, { toValue: 100, duration: 300, useNativeDriver: true }).start(() => {
+        setToast(prev => ({ ...prev, visible: false }));
+      });
+    }, 2500);
+  };
+
+  // --- 4. NAVIGATION HANDLERS ---
+  
+  // Use simple state toggle for sidebar since component handles animation
+  const toggleSidebar = () => setIsSidebarOpen(!isSidebarOpen);
+
   useEffect(() => {
     const backHandler = BackHandler.addEventListener("hardwareBackPress", () => {
       if (isCaptureOpen) {
-        // If in grading stage, go back to camera
         if (captureStage === 'grading') {
           resetCapture();
           return true;
         }
-        // If in camera, close modal
         closeCapture();
         return true;
       }
       if (isSidebarOpen) {
-        toggleSidebar();
+        setIsSidebarOpen(false);
         return true;
       }
       navigation.goBack();
@@ -85,55 +131,42 @@ export default function HandwritingReviewScreen({ navigation }) {
     return () => backHandler.remove();
   }, [isSidebarOpen, isCaptureOpen, captureStage]);
 
-  const toggleSidebar = () => {
-    const isOpen = isSidebarOpen;
-    Animated.parallel([
-      Animated.timing(slideAnim, { toValue: isOpen ? -SIDEBAR_WIDTH : 0, duration: 300, useNativeDriver: true }),
-      Animated.timing(overlayAnim, { toValue: isOpen ? 0 : 0.5, duration: 300, useNativeDriver: true }),
-    ]).start();
-    setIsSidebarOpen(!isOpen);
-  };
-
-  const handleNav = (screen) => {
-    toggleSidebar();
-    navigation.navigate(screen);
-  };
-
-  const handleLogout = async () => {
-    try {
-      await AsyncStorage.multiRemove(["token", "user", "role"]);
-      navigation.replace("Login", { skipAnimation: true });
-    } catch (error) {
-      console.log("Logout error:", error);
-    }
-  };
-
-  // --- CAPTURE LOGIC ---
+  // --- 5. CAMERA ACTIONS ---
   const openCapture = (student) => {
     setCurrentStudent(student);
+    setPhotoPath(null);
     setCaptureStage('camera');
     setIsCaptureOpen(true);
   };
 
-  const takePhoto = () => {
-    // Simulate Capture
-    setCaptureStage('grading');
-    // Animate panel up
-    Animated.spring(panelAnim, {
-      toValue: 0,
-      useNativeDriver: true,
-      damping: 20,
-      stiffness: 90
-    }).start();
+  const takePhoto = async () => {
+    if (camera.current) {
+      try {
+        const photo = await camera.current.takePhoto({
+          qualityPrioritization: 'speed',
+          flash: 'off'
+        });
+        setPhotoPath(`file://${photo.path}`);
+        setCaptureStage('grading');
+        Animated.spring(panelAnim, {
+          toValue: 0,
+          useNativeDriver: true,
+          damping: 20,
+          stiffness: 90
+        }).start();
+      } catch (err) {
+        showToast("Camera error", "error");
+      }
+    }
   };
 
   const resetCapture = () => {
-    // Animate panel down first
     Animated.timing(panelAnim, {
       toValue: height,
       duration: 200,
       useNativeDriver: true
     }).start(() => {
+      setPhotoPath(null);
       setCaptureStage('camera');
     });
   };
@@ -141,7 +174,49 @@ export default function HandwritingReviewScreen({ navigation }) {
   const closeCapture = () => {
     setIsCaptureOpen(false);
     setCaptureStage('camera');
-    panelAnim.setValue(height); // Reset position
+    panelAnim.setValue(height);
+    setRating(0);
+    setComment("");
+    setSelectedTags(['Neat Work']);
+  };
+
+  // --- 6. SUBMIT TO BACKEND ---
+  const handleApprove = async () => {
+    if (!rating) {
+      showToast("Please give a star rating", "error");
+      return;
+    }
+
+    setSubmitting(true);
+    
+    const formData = new FormData();
+    formData.append('studentId', currentStudent.id);
+    formData.append('rating', rating.toString());
+    formData.append('feedback', comment);
+    formData.append('tags', JSON.stringify(selectedTags));
+    
+    if (photoPath) {
+        formData.append('file', {
+            uri: photoPath,
+            type: 'image/jpeg',
+            name: 'review.jpg',
+        });
+    }
+
+    try {
+      await api.post('/teacher/log/handwriting', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      
+      showToast("Logged Successfully!", "success");
+      closeCapture();
+      fetchQueue(); // Refresh list
+    } catch (err) {
+      console.error(err);
+      showToast("Failed to upload review", "error");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const toggleTag = (tag) => {
@@ -152,8 +227,11 @@ export default function HandwritingReviewScreen({ navigation }) {
     }
   };
 
-  // Filter List
-  const filteredList = STUDENTS_QUEUE.filter(item => 
+  // --- 7. RENDER ---
+  const pendingCount = studentQueue.filter(s => s.status === 'pending').length;
+  const loggedCount = studentQueue.filter(s => s.status === 'logged').length;
+
+  const filteredList = studentQueue.filter(item => 
     activeTab === 'pending' ? item.status === 'pending' : item.status === 'logged'
   );
 
@@ -161,105 +239,15 @@ export default function HandwritingReviewScreen({ navigation }) {
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#fff" />
 
-      {/* --- SIDEBAR OVERLAY --- */}
-      <Animated.View
-        style={[styles.overlay, { opacity: overlayAnim }]}
-        pointerEvents={isSidebarOpen ? "auto" : "none"}
-      >
-        <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={toggleSidebar} />
-      </Animated.View>
+      {/* 2. USE THE COMPONENT CORRECTLY */}
+      <TeacherSidebar 
+        isOpen={isSidebarOpen} 
+        onClose={() => setIsSidebarOpen(false)} 
+        navigation={navigation} 
+        activeItem="HandwritingReview"
+      />
 
-      {/* --- SIDEBAR DRAWER (Z-Index 51) --- */}
-      <Animated.View style={[styles.sidebar, { transform: [{ translateX: slideAnim }] }]}>
-        <View style={styles.sidebarContainer}>
-          <View style={{ flex: 1 }}>
-            {/* Sidebar Header */}
-            <View style={styles.sidebarHeader}>
-              <Image 
-                source={{ uri: "https://i.pravatar.cc/150?img=5" }} 
-                style={styles.profilePic} 
-              />
-              <View>
-                <Text style={styles.teacherName}>Priya Sharma</Text>
-                <Text style={styles.teacherCode}>T-2025-08</Text>
-              </View>
-              <View style={styles.classTag}>
-                <Text style={styles.classTagText}>Class Teacher: 9-A</Text>
-              </View>
-            </View>
-
-            {/* Navigation Items (Corrected Teacher Menu) */}
-            <ScrollView style={styles.menuScroll} showsVerticalScrollIndicator={false}>
-              <SidebarItem 
-                icon="chart-pie" 
-                label="Dashboard" 
-                onPress={() => handleNav('TeacherDash')}
-              />
-              <SidebarItem 
-                icon="calendar-check" 
-                label="Daily Tasks" 
-                onPress={() => handleNav('DailyTask')}
-              />
-              <SidebarItem 
-                icon="chalkboard-teacher" 
-                label="My Classes" 
-                onPress={() => handleNav('MyClasses')}
-              />
-              <SidebarItem 
-                icon="users" 
-                label="Student Directory" 
-                onPress={() => handleNav('StudentDirectory')}
-              />
-              
-              <View style={styles.menuDivider} />
-              <Text style={styles.menuSectionLabel}>CONTENT & GRADING</Text>
-
-              <SidebarItem 
-                icon="list-ul" 
-                label="Quiz Manager" 
-                onPress={() => handleNav('QuizDashboard')}
-              />
-              <SidebarItem 
-                icon="pen-fancy" 
-                label="Handwriting Review" 
-                onPress={() => handleNav('HandwritingReview')}
-                active={true}
-              />
-              <SidebarItem 
-                icon="headphones" 
-                label="Audio Review" 
-                onPress={() => handleNav('AudioReview')}
-              />
-              <SidebarItem 
-                icon="bullhorn" 
-                label="Notice Board" 
-                onPress={() => handleNav('NoticeBoard')}
-              />
-              <SidebarItem 
-                icon="folder-open" 
-                label="Resource Library" 
-                onPress={() => handleNav('ResourceLibrary')}
-              />
-
-              <View style={styles.menuDivider} />
-              <SidebarItem icon="question-circle" label="Help & Support" />
-            </ScrollView>
-          </View>
-
-          {/* Footer */}
-          <View style={styles.sidebarFooter}>
-            <TouchableOpacity style={styles.settingsBtn} onPress={() => handleNav('TeacherSetting')}>
-              <FontAwesome5 name="cog" size={16} color="#64748b" />
-              <Text style={styles.settingsText}>Settings</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
-              <FontAwesome5 name="sign-out-alt" size={16} color="#ef4444" />
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Animated.View>
-
-      {/* --- MAIN CONTENT --- */}
+      {/* MAIN CONTENT */}
       <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
         
         {/* Header */}
@@ -271,7 +259,7 @@ export default function HandwritingReviewScreen({ navigation }) {
               </TouchableOpacity>
               <View>
                 <Text style={styles.headerTitle}>Handwriting Queue</Text>
-                <Text style={styles.headerSub}>CLASS 9-A • WEEK 42</Text>
+                <Text style={styles.headerSub}>WEEKLY CHECK</Text>
               </View>
             </View>
           </View>
@@ -282,116 +270,144 @@ export default function HandwritingReviewScreen({ navigation }) {
               style={[styles.tabBtn, activeTab === 'pending' && styles.tabBtnActive]}
               onPress={() => setActiveTab('pending')}
             >
-              <Text style={[styles.tabText, activeTab === 'pending' && styles.tabTextActive]}>Pending (38)</Text>
+              <Text style={[styles.tabText, activeTab === 'pending' && styles.tabTextActive]}>
+                Pending ({pendingCount})
+              </Text>
             </TouchableOpacity>
             <TouchableOpacity 
               style={[styles.tabBtn, activeTab === 'logged' && styles.tabBtnActive]}
               onPress={() => setActiveTab('logged')}
             >
-              <Text style={[styles.tabText, activeTab === 'logged' && styles.tabTextActive]}>Logged (4)</Text>
+              <Text style={[styles.tabText, activeTab === 'logged' && styles.tabTextActive]}>
+                Logged ({loggedCount})
+              </Text>
             </TouchableOpacity>
           </View>
         </View>
 
-        <ScrollView style={styles.scrollContent} contentContainerStyle={{ paddingBottom: 100 }} showsVerticalScrollIndicator={false}>
-          <View style={styles.contentPadding}>
-            
-            {/* Student Ribbon (Horizontal Scroll) */}
-            <Text style={styles.sectionLabel}>QUICK SELECT</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.ribbonScroll}>
-              {STUDENTS_QUEUE.map((item) => (
-                <TouchableOpacity 
-                  key={item.id} 
-                  style={[styles.ribbonItem, selectedStudentId === item.id && styles.ribbonItemActive]}
-                  onPress={() => setSelectedStudentId(item.id)}
-                >
-                  <View style={[styles.ribbonAvatar, { backgroundColor: item.bg }, selectedStudentId === item.id && styles.ribbonAvatarActive]}>
-                    <Text style={[styles.ribbonText, { color: item.color }]}>{item.initials}</Text>
-                  </View>
-                  <Text style={[styles.ribbonName, selectedStudentId === item.id && styles.ribbonNameActive]}>
-                    {item.name.split(' ')[0]}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-              <View style={styles.ribbonItem}>
-                <View style={[styles.ribbonAvatar, { backgroundColor: '#f1f5f9' }]}>
-                  <Text style={[styles.ribbonText, { color: '#94a3b8' }]}>+38</Text>
-                </View>
-                <Text style={styles.ribbonName}>More</Text>
+        {loading ? (
+            <View style={{flex:1, justifyContent:'center', alignItems:'center'}}>
+                <ActivityIndicator size="large" color="#4f46e5" />
+                <Text style={{marginTop:10, color:"#94a3b8"}}>Loading student queue...</Text>
+            </View>
+        ) : (
+            <ScrollView style={styles.scrollContent} contentContainerStyle={{ paddingBottom: 100 }} showsVerticalScrollIndicator={false}>
+              <View style={styles.contentPadding}>
+                
+                {/* Horizontal Ribbon */}
+                <Text style={styles.sectionLabel}>QUICK SELECT</Text>
+                {studentQueue.length > 0 ? (
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.ribbonScroll}>
+                    {studentQueue.map((item) => (
+                        <TouchableOpacity 
+                        key={item.id} 
+                        style={[styles.ribbonItem, selectedStudentId === item.id && styles.ribbonItemActive]}
+                        onPress={() => setSelectedStudentId(item.id)}
+                        >
+                        <View style={[styles.ribbonAvatar, { backgroundColor: item.bg }, selectedStudentId === item.id && styles.ribbonAvatarActive]}>
+                            <Text style={[styles.ribbonText, { color: item.color }]}>{item.initials}</Text>
+                        </View>
+                        <Text style={[styles.ribbonName, selectedStudentId === item.id && styles.ribbonNameActive]}>
+                            {item.name.split(' ')[0]}
+                        </Text>
+                        </TouchableOpacity>
+                    ))}
+                    </ScrollView>
+                ) : (
+                    <Text style={{color:'#94a3b8', fontSize:12, marginBottom:10}}>No students available.</Text>
+                )}
+
+                <View style={{ height: 20 }} />
+
+                {/* List Items */}
+                {filteredList.length === 0 ? (
+                    <View style={{alignItems:'center', marginTop:30}}>
+                        <FontAwesome5 name="clipboard-check" size={40} color="#e2e8f0" />
+                        <Text style={{textAlign:'center', marginTop:10, color:'#94a3b8'}}>
+                            No {activeTab} students found.
+                        </Text>
+                        {studentQueue.length === 0 && (
+                             <TouchableOpacity onPress={fetchQueue} style={{marginTop:20, padding:10}}>
+                                 <Text style={{color:'#4f46e5', fontWeight:'bold'}}>Retry Fetching</Text>
+                             </TouchableOpacity>
+                        )}
+                    </View>
+                ) : (
+                    filteredList.map((item) => (
+                      <TouchableOpacity key={item.id} style={[styles.card, item.status === 'logged' && styles.cardLogged]}>
+                        <View style={styles.cardLeft}>
+                          <View style={[styles.avatarBox, { backgroundColor: item.bg }]}>
+                            <Text style={[styles.avatarText, { color: item.color }]}>{item.initials}</Text>
+                          </View>
+                          <View>
+                            <Text style={styles.cardName}>{item.name}</Text>
+                            {item.status === 'logged' ? (
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                <FontAwesome5 name="star" size={10} color="#fbbf24" solid />
+                                <Text style={styles.cardStatusGreen}>Rated {item.rating}/5</Text>
+                              </View>
+                            ) : (
+                              <Text style={styles.cardStatus}>Roll {item.roll} • Not Logged</Text>
+                            )}
+                          </View>
+                        </View>
+
+                        {item.status === 'pending' ? (
+                          <TouchableOpacity 
+                            style={styles.cameraBtn}
+                            onPress={() => openCapture(item)}
+                          >
+                            <FontAwesome5 name="camera" size={14} color="#64748b" />
+                          </TouchableOpacity>
+                        ) : (
+                          <View style={styles.editBtn}>
+                            <FontAwesome5 name="check" size={12} color="#16a34a" />
+                          </View>
+                        )}
+                      </TouchableOpacity>
+                    ))
+                )}
               </View>
             </ScrollView>
+        )}
 
-            <View style={{ height: 20 }} />
-
-            {/* List */}
-            {filteredList.map((item) => (
-              <TouchableOpacity key={item.id} style={[styles.card, item.status === 'logged' && styles.cardLogged]}>
-                <View style={styles.cardLeft}>
-                  <View style={[styles.avatarBox, { backgroundColor: item.bg, borderColor: item.status === 'logged' ? '#bbf7d0' : 'transparent', borderWidth: item.status === 'logged' ? 1 : 0 }]}>
-                    <Text style={[styles.avatarText, { color: item.status === 'logged' ? '#16a34a' : item.color }]}>{item.initials}</Text>
-                  </View>
-                  <View>
-                    <Text style={styles.cardName}>{item.name}</Text>
-                    {item.status === 'logged' ? (
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                        <FontAwesome5 name="star" size={10} color="#fbbf24" solid />
-                        <Text style={styles.cardStatusGreen}>Good Job</Text>
-                      </View>
-                    ) : (
-                      <Text style={styles.cardStatus}>Roll {item.roll} • Not Logged</Text>
-                    )}
-                  </View>
-                </View>
-
-                {item.status === 'pending' ? (
-                  <TouchableOpacity 
-                    style={styles.cameraBtn}
-                    onPress={() => openCapture(item)}
-                  >
-                    <FontAwesome5 name="camera" size={14} color="#64748b" />
-                  </TouchableOpacity>
-                ) : (
-                  <TouchableOpacity style={styles.editBtn}>
-                    <FontAwesome5 name="pen" size={12} color="#16a34a" />
-                  </TouchableOpacity>
-                )}
-              </TouchableOpacity>
-            ))}
-
-          </View>
-        </ScrollView>
-
-        {/* BOTTOM NAV */}
-        <View style={styles.bottomNav}>
-          <TouchableOpacity style={styles.navItem} onPress={() => navigation.navigate('TeacherDash')}>
-            <FontAwesome5 name="chart-pie" size={20} color="#94a3b8" />
-            <Text style={styles.navLabel}>Dash</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.navItem} onPress={() => navigation.navigate('MyClasses')}>
-            <FontAwesome5 name="chalkboard-teacher" size={20} color="#94a3b8" />
-            <Text style={styles.navLabel}>Classes</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.navItem} >
-            <FontAwesome5 name="pen-fancy" size={20} color="#4f46e5" />
-            <Text style={[styles.navLabel, { color: '#4f46e5' }]}>Review</Text>
-          </TouchableOpacity>
-        </View>
-
+        {/* CUSTOM TOAST */}
+        {toast.visible && (
+            <Animated.View 
+                style={[
+                    styles.toast, 
+                    toast.type === 'error' ? styles.toastError : styles.toastSuccess,
+                    { transform: [{ translateY: toastAnim }] }
+                ]}
+            >
+                <FontAwesome5 
+                    name={toast.type === 'error' ? 'exclamation-circle' : 'check-circle'} 
+                    size={16} 
+                    color="#fff" 
+                />
+                <Text style={styles.toastText}>{toast.message}</Text>
+            </Animated.View>
+        )}
       </SafeAreaView>
 
-      {/* ================================================== */}
-      {/* CAPTURE & GRADE MODAL */}
-      {/* ================================================== */}
+      {/* CAPTURE MODAL */}
       {isCaptureOpen && (
         <View style={styles.captureModal}>
           <StatusBar hidden={true} />
           
-          {/* 1. IMAGE BACKGROUND */}
           <View style={styles.cameraPreview}>
-            <Image 
-              source={{ uri: "https://placehold.co/400x800/1e293b/475569?text=Camera+Preview" }} 
-              style={[styles.previewImage, captureStage === 'camera' && { opacity: 0.6 }]}
-            />
+            {captureStage === 'camera' && device ? (
+                 <Camera
+                   ref={camera}
+                   style={StyleSheet.absoluteFill}
+                   device={device}
+                   isActive={isCaptureOpen}
+                   photo={true}
+                 />
+            ) : (
+                 photoPath && <Image source={{ uri: photoPath }} style={styles.previewImage} />
+            )}
+            
             {captureStage === 'camera' && (
               <View style={styles.viewfinder}>
                 <View style={styles.viewfinderBox} />
@@ -400,7 +416,6 @@ export default function HandwritingReviewScreen({ navigation }) {
             )}
           </View>
 
-          {/* 2. HEADER */}
           <View style={styles.modalHeader}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
               <TouchableOpacity onPress={closeCapture} style={styles.closeBtn}>
@@ -420,7 +435,6 @@ export default function HandwritingReviewScreen({ navigation }) {
             )}
           </View>
 
-          {/* 3. SHUTTER BUTTON (Camera Mode) */}
           {captureStage === 'camera' && (
             <View style={styles.shutterContainer}>
               <TouchableOpacity onPress={takePhoto} style={styles.shutterOuter}>
@@ -429,13 +443,7 @@ export default function HandwritingReviewScreen({ navigation }) {
             </View>
           )}
 
-          {/* 4. GRADING PANEL (Grading Mode) */}
-          <Animated.View 
-            style={[
-              styles.gradingPanel, 
-              { transform: [{ translateY: panelAnim }] }
-            ]}
-          >
+          <Animated.View style={[styles.gradingPanel, { transform: [{ translateY: panelAnim }] }]}>
             <View style={styles.dragHandle} />
 
             <View style={styles.ratingRow}>
@@ -443,12 +451,7 @@ export default function HandwritingReviewScreen({ navigation }) {
               <View style={{ flexDirection: 'row', gap: 8 }}>
                 {[1, 2, 3, 4, 5].map((star) => (
                   <TouchableOpacity key={star} onPress={() => setRating(star)}>
-                    <FontAwesome5 
-                      name="star" 
-                      solid={star <= rating} 
-                      size={24} 
-                      color={star <= rating ? "#fbbf24" : "#e2e8f0"} 
-                    />
+                    <FontAwesome5 name="star" solid={star <= rating} size={24} color={star <= rating ? "#fbbf24" : "#e2e8f0"} />
                   </TouchableOpacity>
                 ))}
               </View>
@@ -463,9 +466,7 @@ export default function HandwritingReviewScreen({ navigation }) {
                     style={[styles.tagChip, selectedTags.includes(tag) && styles.tagChipSelected]}
                     onPress={() => toggleTag(tag)}
                   >
-                    <Text style={[styles.tagText, selectedTags.includes(tag) && { color: '#4f46e5', fontWeight: 'bold' }]}>
-                      {tag}
-                    </Text>
+                    <Text style={[styles.tagText, selectedTags.includes(tag) && { color: '#4f46e5', fontWeight: 'bold' }]}>{tag}</Text>
                   </TouchableOpacity>
                 ))}
               </View>
@@ -477,63 +478,45 @@ export default function HandwritingReviewScreen({ navigation }) {
                 placeholder="Add a specific note..."
                 placeholderTextColor="#94a3b8"
                 style={styles.commentInput}
+                value={comment}
+                onChangeText={setComment}
               />
             </View>
 
             <View style={styles.actionRow}>
               <TouchableOpacity style={styles.redoBtn} onPress={closeCapture}>
-                <FontAwesome5 name="redo" size={14} color="#ef4444" style={{ marginRight: 8 }} />
-                <Text style={styles.redoBtnText}>Redo</Text>
+                <Text style={styles.redoBtnText}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.approveBtn} onPress={closeCapture}>
-                <FontAwesome5 name="check" size={14} color="#fff" style={{ marginRight: 8 }} />
-                <Text style={styles.approveBtnText}>Approve & Next</Text>
+              
+              <TouchableOpacity style={styles.approveBtn} onPress={handleApprove} disabled={submitting}>
+                {submitting ? (
+                    <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                    <>
+                        <FontAwesome5 name="check" size={14} color="#fff" style={{ marginRight: 8 }} />
+                        <Text style={styles.approveBtnText}>Approve & Next</Text>
+                    </>
+                )}
               </TouchableOpacity>
             </View>
 
           </Animated.View>
         </View>
       )}
-
     </View>
   );
 }
 
-/* --- SUB-COMPONENTS --- */
-const SidebarItem = ({ icon, label, onPress, active }) => (
-  <TouchableOpacity style={[styles.sidebarItem, active && styles.sidebarItemActive]} onPress={onPress}>
-    <FontAwesome5 name={icon} size={16} color={active ? "#4f46e5" : "#64748b"} style={{ width: 24 }} />
-    <Text style={[styles.sidebarItemText, active && { color: "#4f46e5", fontWeight: '700' }]}>{label}</Text>
-  </TouchableOpacity>
-);
-
-/* --- STYLES --- */
+// STYLES
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F8FAFC" },
   safeArea: { flex: 1 },
 
-  /* Sidebar */
-  overlay: { position: "absolute", inset: 0, backgroundColor: "rgba(0,0,0,0.5)", zIndex: 50 },
-  sidebar: { position: "absolute", left: 0, top: 0, bottom: 0, width: SIDEBAR_WIDTH, backgroundColor: "#fff", zIndex: 51, elevation: 20 },
-  sidebarContainer: { flex: 1, paddingTop: Platform.OS === 'ios' ? 50 : 20, paddingHorizontal: 20, paddingBottom: 20, justifyContent: 'space-between' },
-  sidebarHeader: { marginBottom: 10,paddingBottom: 20,borderBottomWidth: 1, borderBottomColor: '#F1F5F9',flexDirection: 'column', gap: 12},
-  profileRow: {flexDirection: 'row',alignItems: 'center',gap: 12},
-  profilePic: { width: 50, height: 50, borderRadius: 25, borderWidth: 1, borderColor: '#e2e8f0' },
-  teacherName: { fontSize: 16, fontWeight: 'bold', color: '#1e293b' },
-  teacherCode: { fontSize: 12, color: '#64748b' },
-  classTag: { marginTop: 0, alignSelf: 'flex-start',  backgroundColor: '#eef2ff', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20, marginLeft: 62 },
-  classTagText: { fontSize: 10, fontWeight: 'bold', color: '#4f46e5', textTransform: 'uppercase' },
-  menuScroll: { marginTop: 20, flex: 1 },
-  menuDivider: { height: 1, backgroundColor: '#f1f5f9', marginVertical: 10 },
-  menuSectionLabel: { fontSize: 10, fontWeight: 'bold', color: '#94a3b8', marginBottom: 8, marginLeft: 12, letterSpacing: 0.5 },
-  sidebarItem: { flexDirection: 'row', alignItems: 'center', padding: 12, borderRadius: 12 },
-  sidebarItemActive: { backgroundColor: '#eef2ff' },
-  sidebarItemText: { fontSize: 14, fontWeight: '600', color: '#64748b' },
-  sidebarFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 10, borderTopWidth: 1, borderTopColor: '#f1f5f9' },
-  footerRow: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', alignItems: 'center', paddingHorizontal: 10 },
-  settingsBtn: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  settingsText: { fontSize: 14, fontWeight: '600', color: '#64748b' },
-  logoutBtn: { padding: 8, backgroundColor: '#fef2f2', borderRadius: 8 },
+  /* Toast */
+  toast: { position: 'absolute', bottom: 40, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, paddingHorizontal: 20, borderRadius: 30, zIndex: 999, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 10 },
+  toastSuccess: { backgroundColor: '#16a34a' },
+  toastError: { backgroundColor: '#ef4444' },
+  toastText: { color: '#fff', fontWeight: 'bold', fontSize: 14 },
 
   /* Header */
   header: { paddingHorizontal: 20, paddingVertical: 15, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
@@ -574,12 +557,7 @@ const styles = StyleSheet.create({
   cameraBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#f1f5f9', justifyContent: 'center', alignItems: 'center' },
   editBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#dcfce7', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#bbf7d0' },
 
-  /* Bottom Nav */
-  bottomNav: { flexDirection: 'row', backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#e2e8f0', paddingVertical: 10, paddingBottom: Platform.OS === 'ios' ? 25 : 10, justifyContent: 'space-around', alignItems: 'center', elevation: 10 },
-  navItem: { alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20 },
-  navLabel: { fontSize: 10, fontWeight: '600', color: '#94a3b8', marginTop: 4 },
-
-  /* --- MODAL STYLES --- */
+  /* Modal */
   captureModal: { position: 'absolute', inset: 0, backgroundColor: '#000', zIndex: 100 },
   cameraPreview: { flex: 1, backgroundColor: '#000', position: 'relative' },
   previewImage: { width: '100%', height: '100%', resizeMode: 'cover' },
@@ -598,7 +576,6 @@ const styles = StyleSheet.create({
   shutterOuter: { width: 72, height: 72, borderRadius: 36, borderWidth: 4, borderColor: 'rgba(255,255,255,0.3)', justifyContent: 'center', alignItems: 'center', backgroundColor: 'transparent' },
   shutterInner: { width: 56, height: 56, borderRadius: 28, backgroundColor: '#fff' },
 
-  /* Grading Panel */
   gradingPanel: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40 },
   dragHandle: { width: 40, height: 4, backgroundColor: '#e2e8f0', borderRadius: 2, alignSelf: 'center', marginBottom: 20 },
   ratingRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
