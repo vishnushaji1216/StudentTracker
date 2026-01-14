@@ -18,7 +18,8 @@ import {
 } from "../controllers/teacher.controller.js";
 import { 
    logHandwritingReview, 
-   getHandwritingQueue 
+   getHandwritingQueue,
+   deleteHandwritingReview,
 } from "../controllers/submission.controller.js";
 import auth from "../middleware/auth.middleware.js";
 import mutler from "multer";
@@ -81,5 +82,6 @@ router.get("/students", auth, teacherCheck, getDirectory);
 ===================================================== */
 router.post("/log/handwriting", auth, teacherCheck, upload.single("file"), logHandwritingReview);
 router.get("/queue/handwriting", auth, teacherCheck, getHandwritingQueue);
+router.delete("/log/handwriting/:submissionId", auth, teacherCheck, deleteHandwritingReview);
 
 export default router;

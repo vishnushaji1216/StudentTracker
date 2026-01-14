@@ -19,12 +19,11 @@ import FontAwesome5 from "react-native-vector-icons/FontAwesome5";
 import { useFocusEffect } from "@react-navigation/native";
 import { Camera, useCameraDevice, useCameraPermission } from 'react-native-vision-camera';
 
-// 1. IMPORT SIDEBAR COMPONENT
 import TeacherSidebar from "../../components/TeacherSidebar";
 import api from "../../services/api"; 
 
 const { width, height } = Dimensions.get('window');
-const FEEDBACK_TAGS = ["Neat Work", "Improve Spacing", "Incomplete", "Check Spelling"];
+const FEEDBACK_TAGS = ["Neat Work", "Improve Spacing", "Incomplete", "Improve Handwriting"];
 
 export default function HandwritingReviewScreen({ navigation }) {
   // --- CAMERA HOOKS ---
@@ -54,6 +53,11 @@ export default function HandwritingReviewScreen({ navigation }) {
   const [currentStudent, setCurrentStudent] = useState(null);
   const [photoPath, setPhotoPath] = useState(null);
   
+  // View & Delete Logic
+  const [viewModalOpen, setViewModalOpen] = useState(false);
+  const [viewedSubmission, setViewedSubmission] = useState(null);
+  const [deleteConfirm, setDeleteConfirm] = useState({ visible: false, id: null });
+
   // Grading Form
   const [selectedTags, setSelectedTags] = useState(['Neat Work']);
   const [rating, setRating] = useState(0);
@@ -69,13 +73,7 @@ export default function HandwritingReviewScreen({ navigation }) {
   const fetchQueue = async () => {
     setLoading(true);
     try {
-      // DEBUG LOG: Check your terminal to see what the backend returns
-      console.log("Fetching Handwriting Queue...");
-      
       const response = await api.get('/teacher/queue/handwriting');
-      
-      console.log("Queue Response Data:", response.data); // <--- LOOK HERE IN TERMINAL
-      
       setStudentQueue(response.data);
 
       if (response.data.length > 0 && !selectedStudentId) {
@@ -107,12 +105,21 @@ export default function HandwritingReviewScreen({ navigation }) {
   };
 
   // --- 4. NAVIGATION HANDLERS ---
-  
-  // Use simple state toggle for sidebar since component handles animation
   const toggleSidebar = () => setIsSidebarOpen(!isSidebarOpen);
 
   useEffect(() => {
     const backHandler = BackHandler.addEventListener("hardwareBackPress", () => {
+      // Priority 1: Close Delete Confirm
+      if (deleteConfirm.visible) {
+        setDeleteConfirm({ visible: false, id: null });
+        return true;
+      }
+      // Priority 2: Close Viewer
+      if (viewModalOpen) {
+        setViewModalOpen(false);
+        return true;
+      }
+      // Priority 3: Close Camera
       if (isCaptureOpen) {
         if (captureStage === 'grading') {
           resetCapture();
@@ -121,6 +128,7 @@ export default function HandwritingReviewScreen({ navigation }) {
         closeCapture();
         return true;
       }
+      // Priority 4: Sidebar
       if (isSidebarOpen) {
         setIsSidebarOpen(false);
         return true;
@@ -129,7 +137,7 @@ export default function HandwritingReviewScreen({ navigation }) {
       return true;
     });
     return () => backHandler.remove();
-  }, [isSidebarOpen, isCaptureOpen, captureStage]);
+  }, [isSidebarOpen, isCaptureOpen, captureStage, viewModalOpen, deleteConfirm]);
 
   // --- 5. CAMERA ACTIONS ---
   const openCapture = (student) => {
@@ -146,7 +154,11 @@ export default function HandwritingReviewScreen({ navigation }) {
           qualityPrioritization: 'speed',
           flash: 'off'
         });
-        setPhotoPath(`file://${photo.path}`);
+        
+        // FIX: Ensure file:// prefix exists for React Native Image component
+        const path = photo.path.startsWith('file://') ? photo.path : `file://${photo.path}`;
+        
+        setPhotoPath(path);
         setCaptureStage('grading');
         Animated.spring(panelAnim, {
           toValue: 0,
@@ -219,6 +231,34 @@ export default function HandwritingReviewScreen({ navigation }) {
     }
   };
 
+  // --- 7. VIEW & DELETE LOGIC ---
+  const openViewer = (student) => {
+    setViewedSubmission(student);
+    setViewModalOpen(true);
+  };
+
+  const promptDelete = (submissionId) => {
+    setDeleteConfirm({ visible: true, id: submissionId });
+  };
+
+  const performDelete = async () => {
+    const submissionId = deleteConfirm.id;
+    
+    setDeleteConfirm({ visible: false, id: null });
+    setViewModalOpen(false); 
+    setLoading(true);
+
+    try {
+      await api.delete(`/teacher/log/handwriting/${submissionId}`);
+      showToast("Deleted Successfully", "success");
+      fetchQueue(); 
+    } catch (err) {
+      console.error(err);
+      showToast("Failed to delete", "error");
+      setLoading(false);
+    }
+  };
+
   const toggleTag = (tag) => {
     if (selectedTags.includes(tag)) {
       setSelectedTags(selectedTags.filter(t => t !== tag));
@@ -227,7 +267,7 @@ export default function HandwritingReviewScreen({ navigation }) {
     }
   };
 
-  // --- 7. RENDER ---
+  // --- 8. RENDER ---
   const pendingCount = studentQueue.filter(s => s.status === 'pending').length;
   const loggedCount = studentQueue.filter(s => s.status === 'logged').length;
 
@@ -239,7 +279,6 @@ export default function HandwritingReviewScreen({ navigation }) {
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#fff" />
 
-      {/* 2. USE THE COMPONENT CORRECTLY */}
       <TeacherSidebar 
         isOpen={isSidebarOpen} 
         onClose={() => setIsSidebarOpen(false)} 
@@ -294,7 +333,7 @@ export default function HandwritingReviewScreen({ navigation }) {
             <ScrollView style={styles.scrollContent} contentContainerStyle={{ paddingBottom: 100 }} showsVerticalScrollIndicator={false}>
               <View style={styles.contentPadding}>
                 
-                {/* Horizontal Ribbon */}
+                {/* Horizontal Ribbon
                 <Text style={styles.sectionLabel}>QUICK SELECT</Text>
                 {studentQueue.length > 0 ? (
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.ribbonScroll}>
@@ -315,7 +354,7 @@ export default function HandwritingReviewScreen({ navigation }) {
                     </ScrollView>
                 ) : (
                     <Text style={{color:'#94a3b8', fontSize:12, marginBottom:10}}>No students available.</Text>
-                )}
+                )} */}
 
                 <View style={{ height: 20 }} />
 
@@ -334,7 +373,12 @@ export default function HandwritingReviewScreen({ navigation }) {
                     </View>
                 ) : (
                     filteredList.map((item) => (
-                      <TouchableOpacity key={item.id} style={[styles.card, item.status === 'logged' && styles.cardLogged]}>
+                      <TouchableOpacity 
+                        key={item.id} 
+                        style={[styles.card, item.status === 'logged' && styles.cardLogged]}
+                        onPress={() => item.status === 'logged' ? openViewer(item) : null}
+                        activeOpacity={item.status === 'logged' ? 0.7 : 1}
+                      >
                         <View style={styles.cardLeft}>
                           <View style={[styles.avatarBox, { backgroundColor: item.bg }]}>
                             <Text style={[styles.avatarText, { color: item.color }]}>{item.initials}</Text>
@@ -360,9 +404,12 @@ export default function HandwritingReviewScreen({ navigation }) {
                             <FontAwesome5 name="camera" size={14} color="#64748b" />
                           </TouchableOpacity>
                         ) : (
-                          <View style={styles.editBtn}>
-                            <FontAwesome5 name="check" size={12} color="#16a34a" />
-                          </View>
+                          <TouchableOpacity 
+                             style={styles.editBtn} 
+                             onPress={() => openViewer(item)}
+                          >
+                            <FontAwesome5 name="eye" size={12} color="#16a34a" />
+                          </TouchableOpacity>
                         )}
                       </TouchableOpacity>
                     ))
@@ -390,7 +437,9 @@ export default function HandwritingReviewScreen({ navigation }) {
         )}
       </SafeAreaView>
 
-      {/* CAPTURE MODAL */}
+      {/* --- ABSOLUTE LAYERS (ORDER MATTERS FOR Z-INDEX) --- */}
+
+      {/* 1. Capture Modal */}
       {isCaptureOpen && (
         <View style={styles.captureModal}>
           <StatusBar hidden={true} />
@@ -503,6 +552,99 @@ export default function HandwritingReviewScreen({ navigation }) {
           </Animated.View>
         </View>
       )}
+
+      {/* 2. View Modal */}
+      {viewModalOpen && viewedSubmission && (
+        <View style={styles.viewModal}>
+           <StatusBar hidden={true} />
+           
+           {/* Top Bar */}
+           <View style={styles.viewHeader}>
+              <TouchableOpacity onPress={() => setViewModalOpen(false)} style={styles.closeIconBtn}>
+                 <FontAwesome5 name="times" size={20} color="#fff" />
+              </TouchableOpacity>
+              <Text style={styles.viewTitle}>{viewedSubmission.name}</Text>
+              
+              <TouchableOpacity 
+                style={styles.deleteIconBtn} 
+                onPress={() => promptDelete(viewedSubmission.submissionId)}
+              >
+                 <FontAwesome5 name="trash" size={18} color="#ef4444" />
+              </TouchableOpacity>
+           </View>
+
+           {/* Image */}
+           <View style={styles.imageContainer}>
+             {viewedSubmission.fileUrl ? (
+                 <Image 
+                   source={{ uri: viewedSubmission.fileUrl }} 
+                   style={styles.fullImage} 
+                   resizeMode="contain"
+                 />
+             ) : (
+                 <Text style={{color:'#fff'}}>Image not available</Text>
+             )}
+           </View>
+
+           {/* Info Footer */}
+           <View style={styles.viewFooter}>
+              <View style={styles.footerRow}>
+                 <View style={{flexDirection:'row', gap:5}}>
+                    {[...Array(5)].map((_, i) => (
+                       <FontAwesome5 
+                          key={i} 
+                          name="star" 
+                          solid={i < viewedSubmission.rating} 
+                          size={16} 
+                          color={i < viewedSubmission.rating ? "#fbbf24" : "#475569"} 
+                       />
+                    ))}
+                 </View>
+                 <Text style={styles.footerDate}>Logged</Text>
+              </View>
+              {viewedSubmission.feedback ? (
+                  <Text style={styles.footerFeedback}>"{viewedSubmission.feedback}"</Text>
+              ) : null}
+           </View>
+        </View>
+      )}
+
+      {/* 3. Delete Confirmation Dialog (On Top) */}
+      {deleteConfirm.visible && (
+        <View style={styles.confirmOverlay}>
+          <View style={styles.confirmBox}>
+            
+            <View style={styles.confirmHeader}>
+              <View style={styles.warningIconBox}>
+                <FontAwesome5 name="exclamation-triangle" size={24} color="#f59e0b" />
+              </View>
+              <Text style={styles.confirmTitle}>Delete this log?</Text>
+            </View>
+
+            <Text style={styles.confirmText}>
+              This action cannot be undone. The student's grade and image will be permanently removed.
+            </Text>
+
+            <View style={styles.confirmButtons}>
+              <TouchableOpacity 
+                style={styles.cancelBtn} 
+                onPress={() => setDeleteConfirm({ visible: false, id: null })}
+              >
+                <Text style={styles.cancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity 
+                style={styles.deleteBtn} 
+                onPress={performDelete}
+              >
+                <Text style={styles.deleteBtnText}>Yes, Delete</Text>
+              </TouchableOpacity>
+            </View>
+
+          </View>
+        </View>
+      )}
+
     </View>
   );
 }
@@ -557,7 +699,7 @@ const styles = StyleSheet.create({
   cameraBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#f1f5f9', justifyContent: 'center', alignItems: 'center' },
   editBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#dcfce7', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#bbf7d0' },
 
-  /* Modal */
+  /* Modal & Capture */
   captureModal: { position: 'absolute', inset: 0, backgroundColor: '#000', zIndex: 100 },
   cameraPreview: { flex: 1, backgroundColor: '#000', position: 'relative' },
   previewImage: { width: '100%', height: '100%', resizeMode: 'cover' },
@@ -591,4 +733,32 @@ const styles = StyleSheet.create({
   redoBtnText: { color: '#ef4444', fontWeight: 'bold', fontSize: 14 },
   approveBtn: { flex: 2, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#4f46e5', paddingVertical: 14, borderRadius: 12 },
   approveBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 14 },
+
+  /* VIEW MODAL STYLES */
+  viewModal: { position: 'absolute', inset: 0, backgroundColor: '#000', zIndex: 200, justifyContent: 'center' },
+  viewHeader: { position: 'absolute', top: 40, left: 20, right: 20, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', zIndex: 10 },
+  viewTitle: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
+  closeIconBtn: { padding: 10, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 20 },
+  deleteIconBtn: { padding: 10, backgroundColor: 'rgba(239, 68, 68, 0.2)', borderRadius: 20 },
+  
+  imageContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  fullImage: { width: width, height: height * 0.7 },
+  
+  viewFooter: { position: 'absolute', bottom: 40, left: 20, right: 20, backgroundColor: 'rgba(30, 41, 59, 0.9)', padding: 20, borderRadius: 16 },
+  footerRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
+  footerDate: { color: '#94a3b8', fontSize: 12 },
+  footerFeedback: { color: '#fff', fontStyle: 'italic' },
+
+  /* DELETE CONFIRMATION STYLES */
+  confirmOverlay: { position: 'absolute', inset: 0, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', zIndex: 300 },
+  confirmBox: { width: width * 0.85, backgroundColor: '#fff', borderRadius: 20, padding: 24, alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.25, shadowRadius: 10, elevation: 10 },
+  confirmHeader: { alignItems: 'center', marginBottom: 12 },
+  warningIconBox: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#fef3c7', justifyContent: 'center', alignItems: 'center', marginBottom: 12 },
+  confirmTitle: { fontSize: 18, fontWeight: 'bold', color: '#1e293b' },
+  confirmText: { fontSize: 14, color: '#64748b', textAlign: 'center', marginBottom: 24, lineHeight: 20 },
+  confirmButtons: { flexDirection: 'row', width: '100%', gap: 12 },
+  cancelBtn: { flex: 1, paddingVertical: 12, borderRadius: 12, backgroundColor: '#f1f5f9', alignItems: 'center' },
+  cancelBtnText: { color: '#64748b', fontWeight: 'bold', fontSize: 14 },
+  deleteBtn: { flex: 1, paddingVertical: 12, borderRadius: 12, backgroundColor: '#fee2e2', alignItems: 'center' },
+  deleteBtnText: { color: '#ef4444', fontWeight: 'bold', fontSize: 14 },
 });
