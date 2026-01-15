@@ -4,7 +4,8 @@ import cors from "cors";
 import connectDB from "./config/db.js"; 
 import authRoutes from "./routes/auth.routes.js";
 import adminRoutes from "./routes/admin.routes.js"; 
-import teacherRoutes from "./routes/teacher.routes.js"
+import teacherRoutes from "./routes/teacher.routes.js";
+import studentRoutes from "./routes/student.routes.js";
 
 dotenv.config();
 connectDB();
@@ -26,6 +27,7 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use("/api/auth", authRoutes);
 app.use("/api/admin", adminRoutes); 
 app.use("/api/teacher", teacherRoutes);
+app.use("/api/student", studentRoutes);
 
 app.get("/", (req, res) => {
   res.send("Backend running...");

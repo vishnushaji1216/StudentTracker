@@ -109,7 +109,8 @@ export const createAssignment = async (req, res) => {
       dueDate,
       totalMarks: totalMarks || 100,
       targetType: targetType || 'all',
-      rollRange: targetType === 'range' ? { start: Number(rollStart), end: Number(rollEnd) } : null
+      rollRange: targetType === 'range' ? { start: Number(rollStart), end: Number(rollEnd) } : null,
+      status: 'Active'
     });
 
     await newAssignment.save();

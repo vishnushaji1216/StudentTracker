@@ -86,3 +86,45 @@ export const loginUser = async (req, res) => {
     res.status(500).json({ message: "Server error", error: err.message });
   }
 };
+
+export const switchStudent = async (req, res) => {
+  try {
+    const { targetId } = req.body;
+    const currentId = req.user.id; // From current Valid Token
+
+    // 1. Fetch both students
+    const currentStudent = await Student.findById(currentId);
+    const targetStudent = await Student.findById(targetId);
+
+    if (!targetStudent) {
+      return res.status(404).json({ message: "Target student not found" });
+    }
+
+    // 2. SECURITY CHECK: Ensure they are actually siblings
+    // We strictly check if they share the SAME mobile number.
+    if (currentStudent.mobile !== targetStudent.mobile) {
+      return res.status(403).json({ message: "Access Denied: Not a sibling account." });
+    }
+
+    // 3. Generate NEW Token for the Target Student
+    const token = jwt.sign(
+      { id: targetStudent._id, role: targetStudent.role || 'parent' }, 
+      process.env.JWT_SECRET, 
+      { expiresIn: "7d" }
+    );
+
+    res.json({
+      token,
+      user: {
+        id: targetStudent._id,
+        name: targetStudent.name,
+        className: targetStudent.className,
+        role: targetStudent.role || 'parent'
+      }
+    });
+
+  } catch (error) {
+    console.error("Switch Error:", error);
+    res.status(500).json({ message: "Switch failed" });
+  }
+};

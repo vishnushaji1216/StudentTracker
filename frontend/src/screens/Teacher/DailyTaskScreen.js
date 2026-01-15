@@ -204,12 +204,17 @@ export default function DailyTaskScreen({ navigation }) {
 
     setCreating(true);
     try {
+      // 1. Calculate End of Day (e.g., 11:59 PM Tonight)
+      const deadline = new Date();
+      deadline.setHours(23, 59, 59, 999); 
+      // OR set it to tomorrow if you prefer: deadline.setDate(deadline.getDate() + 1);
+
       const payload = {
         className: selectedClass,
-        subject: "General", // You might want to fetch the subject for this class if available
+        subject: "General", 
         title: taskTitle,
         type: taskType,
-        dueDate: new Date(),
+        dueDate: deadline, // <--- FIXED: Now allows the task to survive the day
         targetType: assignMode, 
         rollStart: assignMode === 'range' ? rollStart : null,
         rollEnd: assignMode === 'range' ? rollEnd : null

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
   View,
   Text,
@@ -7,18 +7,20 @@ import {
   ScrollView,
   StatusBar,
   Animated,
-  Image,
   BackHandler,
   Platform,
   Linking,
   Dimensions,
   UIManager,
-  LayoutAnimation,
+  ActivityIndicator,
+  RefreshControl,
   Alert
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import FontAwesome5 from "react-native-vector-icons/FontAwesome5";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useFocusEffect } from "@react-navigation/native";
+import api from "../../services/api";
 
 // Enable Animations
 if (Platform.OS === 'android') {
@@ -30,25 +32,20 @@ if (Platform.OS === 'android') {
 const { width } = Dimensions.get('window');
 const SIDEBAR_WIDTH = Math.min(280, width * 0.8);
 
-// Mock Data
-const MOCK_TEACHERS = [
-  { id: '1', name: 'Mrs. Priya Sharma', role: 'Class Teacher', subject: null, color: '#4f46e5', bg: '#eef2ff', phone: '9876543210' },
-  { id: '2', name: 'Mr. Rahul Verma', role: 'Subject Teacher', subject: 'Physics', color: '#ea580c', bg: '#fff7ed', phone: '9876543211' }
-];
-
-const MOCK_SIBLINGS = [
-  { id: '1', name: 'Arjun Kumar', class: 'Class 9-A', initials: 'AK', color: '#4f46e5', bg: '#eef2ff' },
-  { id: '2', name: 'Diya Singh', class: 'Class 10-B', initials: 'DS', color: '#64748b', bg: '#f1f5f9' }
-];
-
 export default function StudentProfileScreen({ navigation }) {
   // Sidebar State
   const slideAnim = useRef(new Animated.Value(-SIDEBAR_WIDTH)).current;
   const overlayAnim = useRef(new Animated.Value(0)).current;
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
-  // Profile State
-  const [currentStudentId, setCurrentStudentId] = useState('1');
+  // Data State
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [profileData, setProfileData] = useState({
+    profile: { name: "", className: "", rollNo: "", initials: "" },
+    siblings: [], // <--- This will come from API, not Mock Data
+    teachers: []
+  });
 
   // Handle Android Back Button
   useEffect(() => {
@@ -62,6 +59,44 @@ export default function StudentProfileScreen({ navigation }) {
     });
     return () => backHandler.remove();
   }, [isSidebarOpen]);
+
+  // Fetch Data on Focus
+  useFocusEffect(
+    useCallback(() => {
+      fetchProfile();
+    }, [])
+  );
+
+  const fetchProfile = async () => {
+    try {
+      const response = await api.get('/student/profile');
+      
+      const data = response.data;
+      
+      // Ensure initials exist
+      data.profile.initials = data.profile.name ? data.profile.name.substring(0, 2).toUpperCase() : "ST";
+      
+      // Process siblings initials
+      if (data.siblings) {
+        data.siblings = data.siblings.map(s => ({
+            ...s,
+            initials: s.name ? s.name.substring(0, 2).toUpperCase() : "SB"
+        }));
+      }
+
+      setProfileData(data);
+    } catch (error) {
+      console.log("Profile fetch error:", error);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    fetchProfile();
+  };
 
   const toggleSidebar = () => {
     const isOpen = isSidebarOpen;
@@ -89,17 +124,39 @@ export default function StudentProfileScreen({ navigation }) {
   const handleLogout = async () => {
     try {
       await AsyncStorage.multiRemove(["token", "user", "role"]);
-      // navigation.replace("Login", { skipAnimation: true });
-      console.log("Logged out");
+      navigation.replace("Login");
     } catch (error) {
       console.log("Logout error:", error);
     }
   };
 
-  const handleSwitchAccount = (siblingId) => {
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    setCurrentStudentId(siblingId);
-    // In a real app, this would refresh the user context
+  const handleSwitchAccount = async (siblingId) => {
+    try {
+      setLoading(true); // Show spinner while switching
+
+      // 1. Call Backend to get new token
+      const response = await api.post('/auth/switch', { targetId: siblingId });
+      const { token, user } = response.data;
+
+      // 2. Hot-Swap the Credentials in Storage
+      await AsyncStorage.multiSet([
+        ["token", token],
+        ["user", JSON.stringify(user)],
+        ["role", user.role || 'parent']
+      ]);
+
+      // 3. Force Reset Navigation to Dashboard
+      // This ensures the Dashboard re-mounts and fetches new data for the new student
+      navigation.reset({
+        index: 0,
+        routes: [{ name: 'StudentDash' }],
+      });
+      
+    } catch (error) {
+      console.error("Switching Failed:", error);
+      Alert.alert("Error", "Failed to switch account. Please try again.");
+      setLoading(false);
+    }
   };
 
   const openWhatsApp = (phone) => {
@@ -113,9 +170,15 @@ export default function StudentProfileScreen({ navigation }) {
     Linking.openURL(`tel:${phone}`);
   };
 
-  // Get current student data
-  const currentStudent = MOCK_SIBLINGS.find(s => s.id === currentStudentId);
-  const otherSiblings = MOCK_SIBLINGS.filter(s => s.id !== currentStudentId);
+  if (loading) {
+    return (
+      <View style={{flex:1, justifyContent:'center', alignItems:'center', backgroundColor: "#F8FAFC"}}>
+          <ActivityIndicator size="large" color="#4f46e5" />
+      </View>
+    );
+  }
+
+  const { profile, siblings, teachers } = profileData;
 
   return (
     <View style={styles.container}>
@@ -138,15 +201,14 @@ export default function StudentProfileScreen({ navigation }) {
       <Animated.View style={[styles.sidebar, { transform: [{ translateX: slideAnim }] }]}>
         <SafeAreaView style={styles.sidebarSafeArea}>
             <View style={styles.sidebarContainer}>
-                {/* Top Section (Header + Menu) */}
                 <View style={styles.sidebarContentWrapper}>
                     <View style={styles.sidebarHeader}>
                         <View style={styles.logoBox}>
-                            <Text style={styles.logoText}>{currentStudent.initials}</Text>
+                            <Text style={styles.logoText}>{profile.initials}</Text>
                         </View>
                         <View>
-                            <Text style={styles.sidebarTitle}>{currentStudent.name}</Text>
-                            <Text style={styles.sidebarVersion}>{currentStudent.class}</Text>
+                            <Text style={styles.sidebarTitle}>{profile.name}</Text>
+                            <Text style={styles.sidebarVersion}>{profile.className}</Text>
                         </View>
                     </View>
 
@@ -154,20 +216,14 @@ export default function StudentProfileScreen({ navigation }) {
                         <SidebarItem icon="home" label="Home" onPress={() => handleNav('StudentDash')} />
                         <SidebarItem icon="chart-bar" label="Academic Stats" onPress={() => handleNav('StudentStats')} />
                         <SidebarItem icon="folder-open" label="Resource Library" onPress={() => handleNav('StudentResource')} />
-                        
-                        {/* <View style={styles.menuDivider} />
-                        <Text style={styles.menuSectionLabel}>ACADEMICS</Text> */}
-                        
                         <SidebarItem icon="list-ol" label="Quiz Center" onPress={() => handleNav('StudentQuizCenter')}/>
                         <SidebarItem icon="microphone" label="Daily Audio" onPress={() => handleNav('AudioRecorder')} />
-                        <SidebarItem icon="bullhorn" label="Notice" onPress={() => handleNav('StudentNoticBoard')} />
-                        
+                        <SidebarItem icon="bullhorn" label="Notice" onPress={() => handleNav('StudentNoticeBoard')} />
                         <View style={styles.menuDivider} />
                         <SidebarItem icon="question-circle" label="Help & Support" />
                     </ScrollView>
                 </View>
 
-                {/* Bottom Footer */}
                 <View style={styles.sidebarFooter}>
                     <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
                         <FontAwesome5 name="sign-out-alt" size={16} color="#ef4444" />
@@ -195,62 +251,69 @@ export default function StudentProfileScreen({ navigation }) {
           style={styles.scrollContent} 
           contentContainerStyle={{ paddingBottom: 100 }} 
           showsVerticalScrollIndicator={false}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         >
           <View style={styles.contentPadding}>
             
             {/* 1. Profile Card */}
             <View style={styles.profileCard}>
               <View style={styles.avatarLarge}>
-                <Text style={styles.avatarTextLarge}>{currentStudent.initials}</Text>
+                <Text style={styles.avatarTextLarge}>{profile.initials}</Text>
               </View>
-              <Text style={styles.profileName}>{currentStudent.name}</Text>
-              <Text style={styles.profileClass}>{currentStudent.class} • Roll No. 24</Text>
+              <Text style={styles.profileName}>{profile.name}</Text>
+              <Text style={styles.profileClass}>{profile.className} • Roll No. {profile.rollNo}</Text>
             </View>
 
-            {/* 2. Sibling Switcher */}
-            <Text style={styles.sectionTitle}>SWITCH ACCOUNT</Text>
-            <View style={styles.siblingCard}>
-              {/* Current Active */}
-              <View style={styles.siblingRowActive}>
-                <View style={styles.siblingLeft}>
-                  <View style={[styles.miniAvatar, { backgroundColor: '#e0e7ff' }]}>
-                    <Text style={[styles.miniAvatarText, { color: '#4f46e5' }]}>{currentStudent.initials}</Text>
+            {/* 2. Sibling Switcher (ONLY SHOW IF SIBLINGS EXIST) */}
+            {siblings.length > 0 && (
+              <>
+                <Text style={styles.sectionTitle}>SWITCH ACCOUNT</Text>
+                <View style={styles.siblingCard}>
+                  {/* Current Active */}
+                  <View style={styles.siblingRowActive}>
+                    <View style={styles.siblingLeft}>
+                      <View style={[styles.miniAvatar, { backgroundColor: '#e0e7ff' }]}>
+                        <Text style={[styles.miniAvatarText, { color: '#4f46e5' }]}>{profile.initials}</Text>
+                      </View>
+                      <Text style={styles.siblingNameActive}>{profile.name} (You)</Text>
+                    </View>
+                    <FontAwesome5 name="check-circle" solid size={16} color="#4f46e5" />
                   </View>
-                  <Text style={styles.siblingNameActive}>{currentStudent.name} (You)</Text>
+
+                  {/* Other Siblings */}
+                  {siblings.map((sibling) => (
+                    <TouchableOpacity 
+                      key={sibling._id} 
+                      style={styles.siblingRow}
+                      onPress={() => handleSwitchAccount(sibling._id)}
+                    >
+                      <View style={styles.siblingLeft}>
+                        <View style={[styles.miniAvatar, { backgroundColor: '#f1f5f9' }]}>
+                          <Text style={[styles.miniAvatarText, { color: '#64748b' }]}>{sibling.initials}</Text>
+                        </View>
+                        <View>
+                          <Text style={styles.siblingName}>{sibling.name}</Text>
+                          <Text style={styles.siblingClass}>{sibling.className}</Text>
+                        </View>
+                      </View>
+                      <View style={styles.switchBadge}>
+                        <Text style={styles.switchText}>Switch</Text>
+                      </View>
+                    </TouchableOpacity>
+                  ))}
                 </View>
-                <FontAwesome5 name="check-circle" solid size={16} color="#4f46e5" />
-              </View>
-
-              {/* Other Siblings */}
-              {otherSiblings.map((sibling) => (
-                <TouchableOpacity 
-                  key={sibling.id} 
-                  style={styles.siblingRow}
-                  onPress={() => handleSwitchAccount(sibling.id)}
-                >
-                  <View style={styles.siblingLeft}>
-                    <View style={[styles.miniAvatar, { backgroundColor: '#f1f5f9' }]}>
-                      <Text style={[styles.miniAvatarText, { color: '#64748b' }]}>{sibling.initials}</Text>
-                    </View>
-                    <View>
-                      <Text style={styles.siblingName}>{sibling.name}</Text>
-                      <Text style={styles.siblingClass}>{sibling.class}</Text>
-                    </View>
-                  </View>
-                  <View style={styles.switchBadge}>
-                    <Text style={styles.switchText}>Switch</Text>
-                  </View>
-                </TouchableOpacity>
-              ))}
-            </View>
+              </>
+            )}
 
             {/* 3. My Teachers */}
             <Text style={styles.sectionTitle}>MY TEACHERS</Text>
             <View style={styles.teacherList}>
-              {MOCK_TEACHERS.map((teacher) => (
+              {teachers.length > 0 ? teachers.map((teacher) => (
                 <View key={teacher.id} style={styles.teacherCard}>
                   <View style={styles.teacherLeft}>
-                    <Image source={{ uri: "https://i.pravatar.cc/150?img=5" }} style={styles.teacherImg} />
+                    <View style={[styles.teacherImg, { backgroundColor: '#f1f5f9', justifyContent:'center', alignItems:'center' }]}>
+                         <FontAwesome5 name="user" size={16} color="#94a3b8" />
+                    </View>
                     <View>
                       <Text style={styles.teacherNameCard}>{teacher.name}</Text>
                       {teacher.role === 'Class Teacher' ? (
@@ -266,19 +329,21 @@ export default function StudentProfileScreen({ navigation }) {
                   <View style={styles.contactRow}>
                     <TouchableOpacity 
                       style={[styles.contactBtn, styles.waBtn]}
-                      onPress={() => openWhatsApp(teacher.phone)}
+                      onPress={() => openWhatsApp(teacher.mobile)}
                     >
                       <FontAwesome5 name="whatsapp" size={14} color="#16a34a" />
                     </TouchableOpacity>
                     <TouchableOpacity 
                       style={[styles.contactBtn, styles.callBtn]}
-                      onPress={() => openDialer(teacher.phone)}
+                      onPress={() => openDialer(teacher.mobile)}
                     >
                       <FontAwesome5 name="phone-alt" size={12} color="#4f46e5" />
                     </TouchableOpacity>
                   </View>
                 </View>
-              ))}
+              )) : (
+                 <Text style={styles.emptyText}>No teachers assigned yet.</Text>
+              )}
             </View>
 
             {/* 4. Logout */}
@@ -287,7 +352,7 @@ export default function StudentProfileScreen({ navigation }) {
                <Text style={styles.signOutText}>Sign Out</Text>
             </TouchableOpacity>
             
-            <Text style={styles.versionText}>Stella App v5.0.0</Text>
+            <Text style={styles.versionText}>Stella App v1.0.0</Text>
 
           </View>
         </ScrollView>
@@ -397,6 +462,8 @@ const styles = StyleSheet.create({
   contactBtn: { width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center', borderWidth: 1 },
   waBtn: { backgroundColor: '#f0fdf4', borderColor: '#dcfce7' },
   callBtn: { backgroundColor: '#f8fafc', borderColor: '#e2e8f0' },
+  
+  emptyText: { color: '#94a3b8', fontStyle: 'italic', fontSize: 12 },
 
   /* Logout */
   signOutBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#fef2f2', borderWidth: 1, borderColor: '#fecaca', paddingVertical: 14, borderRadius: 12, marginBottom: 8 },

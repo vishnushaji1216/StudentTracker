@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
   View,
   Text,
@@ -10,11 +10,15 @@ import {
   BackHandler,
   Platform,
   Dimensions,
-  UIManager
+  UIManager,
+  ActivityIndicator,
+  RefreshControl
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import FontAwesome5 from "react-native-vector-icons/FontAwesome5";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useFocusEffect } from "@react-navigation/native";
+import api from "../../services/api"; // Ensure this path is correct
 
 // Enable Animations
 if (Platform.OS === 'android') {
@@ -23,17 +27,8 @@ if (Platform.OS === 'android') {
   }
 }
 
-const { width, height } = Dimensions.get('window');
+const { width } = Dimensions.get('window');
 const SIDEBAR_WIDTH = Math.min(280, width * 0.8);
-
-// --- MOCK DATA FROM TEACHER ---
-const DAILY_TASK = {
-  id: '101',
-  type: 'audio', // Options: 'audio', 'homework', 'quiz', 'none'
-  title: 'Recite: Poem 4',
-  deadline: '10:00 PM',
-  subject: 'English'
-};
 
 export default function StudentDashScreen({ navigation }) {
   // Sidebar State
@@ -41,9 +36,16 @@ export default function StudentDashScreen({ navigation }) {
   const overlayAnim = useRef(new Animated.Value(0)).current;
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
-  // Student State
-  const [studentName, setStudentName] = useState("Arjun");
-  const [className, setClassName] = useState("Class 9-A");
+  // Data State
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [dashboardData, setDashboardData] = useState({
+    student: { name: "", className: "", initials: "" },
+    hasSiblings: false,
+    dailyMission: null,
+    pendingList: [],
+    feedback: []
+  });
 
   // Handle Android Back Button
   useEffect(() => {
@@ -52,16 +54,37 @@ export default function StudentDashScreen({ navigation }) {
         toggleSidebar();
         return true;
       }
-      return false; // Default exit behavior
+      return false;
     });
     return () => backHandler.remove();
   }, [isSidebarOpen]);
 
+  // Fetch Data on Focus
+  useFocusEffect(
+    useCallback(() => {
+      fetchDashboard();
+    }, [])
+  );
+
+  const fetchDashboard = async () => {
+    try {
+      const response = await api.get('/student/dashboard');
+      setDashboardData(response.data);
+    } catch (error) {
+      console.log("Dashboard fetch error:", error);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    fetchDashboard();
+  };
+
   const toggleSidebar = () => {
     const isOpen = isSidebarOpen;
-    // If opening, set state first to render, then animate.
-    // If closing, animate then set state (optional, but keeping simpler logic here)
-    
     setIsSidebarOpen(!isOpen);
 
     Animated.parallel([
@@ -86,30 +109,42 @@ export default function StudentDashScreen({ navigation }) {
   const handleLogout = async () => {
     try {
       await AsyncStorage.multiRemove(["token", "user", "role"]);
-      // navigation.replace("Login", { skipAnimation: true }); 
-      console.log("Logged out");
+      navigation.replace("Login"); 
     } catch (error) {
       console.log("Logout error:", error);
     }
   };
 
-  const handleTaskAction = () => {
-    // Navigation logic here
-    console.log("Task Action Triggered");
+  // Helper: Check if date is within last 2 days
+  const isRecent = (dateString) => {
+    const date = new Date(dateString);
+    const twoDaysAgo = new Date();
+    twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+    return date >= twoDaysAgo;
   };
+
+  const recentFeedback = dashboardData.feedback.filter(item => isRecent(item.updatedAt));
+
+  if (loading) {
+    return (
+        <View style={{flex:1, justifyContent:'center', alignItems:'center', backgroundColor: "#F8FAFC"}}>
+            <ActivityIndicator size="large" color="#4f46e5" />
+        </View>
+    );
+  }
+
+  const { student, hasSiblings, dailyMission, pendingList } = dashboardData;
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#fff" />
 
       {/* --- SIDEBAR OVERLAY --- */}
-      {/* We use position absolute to cover the whole screen */}
       <Animated.View
         style={[
           styles.overlay, 
           { 
             opacity: overlayAnim,
-            // Move overlay off-screen when closed so it doesn't block touches
             transform: [{ translateX: isSidebarOpen ? 0 : -width }] 
           }
         ]}
@@ -121,15 +156,14 @@ export default function StudentDashScreen({ navigation }) {
       <Animated.View style={[styles.sidebar, { transform: [{ translateX: slideAnim }] }]}>
         <SafeAreaView style={styles.sidebarSafeArea}>
             <View style={styles.sidebarContainer}>
-            {/* Top Section (Header + Menu) */}
             <View style={styles.sidebarContentWrapper}>
                 <View style={styles.sidebarHeader}>
                     <View style={styles.avatarLarge}>
-                        <Text style={styles.avatarTextLarge}>AK</Text>
+                        <Text style={styles.avatarTextLarge}>{student.initials}</Text>
                     </View>
                     <View>
-                        <Text style={styles.sidebarName}>{studentName}</Text>
-                        <Text style={styles.sidebarClass}>{className}</Text>
+                        <Text style={styles.sidebarName}>{student.name}</Text>
+                        <Text style={styles.sidebarClass}>{student.className}</Text>
                     </View>
                 </View>
 
@@ -137,22 +171,14 @@ export default function StudentDashScreen({ navigation }) {
                     <SidebarItem icon="home" label="Home" active onPress={() => handleNav('StudentDash')} />
                     <SidebarItem icon="chart-bar" label="Academic Stats" onPress={() => handleNav('StudentStats')}/>
                     <SidebarItem icon="folder-open" label="Resource Library" onPress={() => handleNav('StudentResource')}/>
-                    
-                    {/* <View style={styles.menuDivider} />
-                    <Text style={styles.menuSectionLabel}>ACADEMICS</Text> */}
-                    
                     <SidebarItem icon="list-ol" label="Quiz Center" onPress={() => handleNav('StudentQuizCenter')}/>
-                    <SidebarItem icon="microphone" label="Daily Audio" onPress={() => handleNav('AudioRecord')}/>
-                    <SidebarItem icon="bullhorn" label="Notice" onPress={() => handleNav('StudentNoticBoard')} />
-                    
-                    
-                    
+                    <SidebarItem icon="microphone" label="Daily Audio" onPress={() => handleNav('AudioRecorder')}/>
+                    <SidebarItem icon="bullhorn" label="Notice" onPress={() => handleNav('StudentNoticeBoard')} />
                     <View style={styles.menuDivider} />
                     <SidebarItem icon="question-circle" label="Help & Support" />
                 </ScrollView>
             </View>
 
-            {/* Bottom Footer */}
             <View style={styles.sidebarFooter}>
                 <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
                     <FontAwesome5 name="sign-out-alt" size={16} color="#ef4444" />
@@ -173,13 +199,17 @@ export default function StudentDashScreen({ navigation }) {
               <FontAwesome5 name="bars" size={20} color="#334155" />
             </TouchableOpacity>
             
-            {/* Sibling Switcher */}
-            <TouchableOpacity style={styles.siblingPill}>
+            {/* Sibling Switcher - ONLY IF HAS SIBLINGS */}
+            <TouchableOpacity 
+                style={[styles.siblingPill, !hasSiblings && styles.siblingPillDisabled]}
+                disabled={!hasSiblings}
+                onPress={() => navigation.navigate('StudentProfile')}
+            >
                <View style={styles.miniAvatar}>
-                 <Text style={styles.miniAvatarText}>AK</Text>
+                 <Text style={styles.miniAvatarText}>{student.initials}</Text>
                </View>
-               <Text style={styles.siblingName}>{studentName}</Text>
-               <FontAwesome5 name="chevron-down" size={10} color="#94a3b8" />
+               <Text style={styles.siblingName}>{student.name}</Text>
+               {hasSiblings && <FontAwesome5 name="chevron-down" size={10} color="#94a3b8" />}
             </TouchableOpacity>
           </View>
         </View>
@@ -188,6 +218,7 @@ export default function StudentDashScreen({ navigation }) {
           style={styles.scrollContent} 
           contentContainerStyle={{ paddingBottom: 100 }} 
           showsVerticalScrollIndicator={false}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         >
           <View style={styles.contentPadding}>
             
@@ -195,31 +226,29 @@ export default function StudentDashScreen({ navigation }) {
             <View style={styles.sectionMb}>
               <Text style={styles.sectionTitle}>TODAY'S MISSION</Text>
               
-              {/* Dynamic Task Card */}
-              {DAILY_TASK.type !== 'none' ? (
+              {dailyMission ? (
                 <View style={styles.heroCard}>
                   <View style={styles.heroContent}>
-                    {/* Decorative Blobs */}
-                    <View style={styles.blob1} />
-                    <View style={styles.blob2} />
+                    {/* <View style={styles.blob1} />
+                    <View style={styles.blob2} /> */}
                     
                     <View style={styles.heroTop}>
                       <View>
                         <View style={styles.heroBadge}>
                           <Text style={styles.heroBadgeText}>
-                            {DAILY_TASK.type === 'audio' ? 'DAILY AUDIO' : 
-                             DAILY_TASK.type === 'quiz' ? 'WEEKLY QUIZ' : 'HOMEWORK'}
+                            {dailyMission.type === 'audio' ? 'DAILY AUDIO' : 
+                             dailyMission.type === 'quiz' ? 'WEEKLY QUIZ' : 'HOMEWORK'}
                           </Text>
                         </View>
-                        <Text style={styles.heroTitle}>{DAILY_TASK.title}</Text>
-                        <Text style={styles.heroSub}>Due by {DAILY_TASK.deadline}</Text>
+                        <Text style={styles.heroTitle}>{dailyMission.title}</Text>
+                        <Text style={styles.heroSub}>Due by {dailyMission.deadline}</Text>
                       </View>
                       
                       <View style={styles.heroIconBox}>
                         <FontAwesome5 
                           name={
-                            DAILY_TASK.type === 'audio' ? 'microphone' : 
-                            DAILY_TASK.type === 'quiz' ? 'list-ol' : 'pen'
+                            dailyMission.type === 'audio' ? 'microphone' : 
+                            dailyMission.type === 'quiz' ? 'list-ol' : 'pen'
                           } 
                           size={24} 
                           color="#fff" 
@@ -230,19 +259,24 @@ export default function StudentDashScreen({ navigation }) {
                     <TouchableOpacity 
                       style={styles.heroButton}
                       activeOpacity={0.9}
-                      onPress={handleTaskAction}
+                      onPress={() => {
+                          if (dailyMission.type === 'audio') navigation.navigate('AudioRecorder');
+                          else if (dailyMission.type === 'quiz') navigation.navigate('StudentQuizCenter');
+                          else console.log('Homework details');
+                      }}
                     >
                       <FontAwesome5 name="play-circle" size={16} color="#4f46e5" />
                       <Text style={styles.heroButtonText}>
-                        {DAILY_TASK.type === 'audio' ? 'Start Recording' : 
-                         DAILY_TASK.type === 'quiz' ? 'Start Quiz' : 'Upload Work'}
+                        {dailyMission.type === 'audio' ? 'Start Recording' : 
+                         dailyMission.type === 'quiz' ? 'Start Quiz' : 'View Details'}
                       </Text>
                     </TouchableOpacity>
                   </View>
                 </View>
               ) : (
                 <View style={styles.emptyState}>
-                  <Text style={styles.emptyText}>No active tasks for today! 🎉</Text>
+                   <FontAwesome5 name="calendar-check" size={24} color="#cbd5e1" style={{ marginBottom: 8 }} />
+                  <Text style={styles.emptyText}>No daily task today! 🎉</Text>
                 </View>
               )}
             </View>
@@ -251,83 +285,104 @@ export default function StudentDashScreen({ navigation }) {
             <View style={styles.sectionMb}>
               <Text style={styles.sectionTitle}>TO DO LIST</Text>
               
-              <View style={styles.taskCard}>
-                <View style={styles.taskInfo}>
-                  <Text style={styles.taskTitle}>Weekly Math Test</Text>
-                  <View style={styles.timerRow}>
-                    <FontAwesome5 name="clock" size={10} color="#ef4444" />
-                    <Text style={styles.timerText}>Ends in 2h</Text>
-                  </View>
+              {pendingList.length > 0 ? (
+                 pendingList.map((task) => (
+                    <View key={task.id} style={styles.taskCard}>
+                        <View style={styles.taskInfo}>
+                            <Text style={styles.taskTitle}>{task.title}</Text>
+                            <View style={styles.timerRow}>
+                                <FontAwesome5 name="clock" size={10} color="#ef4444" />
+                                <Text style={styles.timerText}>{task.endsIn}</Text>
+                            </View>
+                        </View>
+                        <TouchableOpacity 
+                            style={styles.startBtn}
+                            onPress={() => {
+                                if (task.type === 'audio') navigation.navigate('AudioRecorder');
+                                else if (task.type === 'quiz') navigation.navigate('StudentQuizCenter');
+                            }}
+                        >
+                            <Text style={styles.startBtnText}>
+                                {task.type === 'quiz' ? 'Start Quiz' : task.type === 'audio' ? 'Record' : 'View'}
+                            </Text>
+                        </TouchableOpacity>
+                    </View>
+                 ))
+              ) : (
+                <View style={styles.emptyState}>
+                    <FontAwesome5 name="check-circle" size={24} color="#cbd5e1" style={{ marginBottom: 8 }} />
+                    <Text style={styles.emptyText}>No tasks to do. Great job!</Text>
                 </View>
-                <TouchableOpacity style={styles.startBtn}>
-                  <Text style={styles.startBtnText}>Start Quiz</Text>
-                </TouchableOpacity>
-              </View>
+              )}
             </View>
 
             {/* 3. RECENT FEEDBACK */}
-            <View style={styles.sectionMb}>
-              <Text style={styles.sectionTitle}>TEACHER FEEDBACK</Text>
-              
-              {/* Handwriting Feedback */}
-              <View style={styles.feedbackCard}>
-                <View style={styles.feedbackHeader}>
-                  <View style={styles.feedbackLeft}>
-                    <View style={[styles.iconBox, { backgroundColor: '#faf5ff' }]}>
-                      <FontAwesome5 name="pen-fancy" size={12} color="#9333ea" />
-                    </View>
-                    <Text style={styles.feedbackCategory}>Handwriting</Text>
-                  </View>
-                  <Text style={styles.feedbackDate}>Yesterday</Text>
-                </View>
+            {recentFeedback.length > 0 && (
+                <View style={styles.sectionMb}>
+                <Text style={styles.sectionTitle}>TEACHER FEEDBACK (LAST 2 DAYS)</Text>
                 
-                <View style={styles.starRow}>
-                  <View style={styles.stars}>
-                    <FontAwesome5 name="star" solid size={12} color="#fbbf24" />
-                    <FontAwesome5 name="star" solid size={12} color="#fbbf24" />
-                    <FontAwesome5 name="star" solid size={12} color="#fbbf24" />
-                    <FontAwesome5 name="star" solid size={12} color="#fbbf24" />
-                    <FontAwesome5 name="star" size={12} color="#cbd5e1" />
-                  </View>
-                  <Text style={styles.goodWorkText}>Good Work!</Text>
-                </View>
+                {recentFeedback.map((item) => (
+                    <View key={item._id} style={styles.feedbackCard}>
+                        <View style={styles.feedbackHeader}>
+                        <View style={styles.feedbackLeft}>
+                            <View style={[styles.iconBox, { backgroundColor: '#faf5ff' }]}>
+                                <FontAwesome5 
+                                    name={item.type === 'Handwriting' ? 'pen-fancy' : 'comment'} 
+                                    size={12} color="#9333ea" 
+                                />
+                            </View>
+                            <Text style={styles.feedbackCategory}>{item.type || 'Review'}</Text>
+                        </View>
+                        <Text style={styles.feedbackDate}>Just Now</Text>
+                        </View>
+                        
+                        {/* Stars */}
+                        <View style={styles.starRow}>
+                        <View style={styles.stars}>
+                            {[1, 2, 3, 4, 5].map((s) => (
+                                <FontAwesome5 
+                                    key={s} 
+                                    name="star" 
+                                    solid={s <= item.obtainedMarks} 
+                                    size={12} 
+                                    color={s <= item.obtainedMarks ? "#fbbf24" : "#cbd5e1"} 
+                                />
+                            ))}
+                        </View>
+                        <Text style={styles.goodWorkText}>
+                            {item.obtainedMarks >= 4 ? "Good Work!" : "Keep Improving"}
+                        </Text>
+                        </View>
 
-                <View style={styles.tagsRow}>
-                  <View style={[styles.tag, { backgroundColor: '#f0fdf4', borderColor: '#dcfce7' }]}>
-                    <Text style={[styles.tagText, { color: '#15803d' }]}>Neat</Text>
-                  </View>
-                  <View style={[styles.tag, { backgroundColor: '#f8fafc', borderColor: '#e2e8f0' }]}>
-                    <Text style={[styles.tagText, { color: '#64748b' }]}>Legible</Text>
-                  </View>
-                </View>
-              </View>
-
-              {/* Behavior Log */}
-              <View style={styles.feedbackCard}>
-                <View style={styles.feedbackHeader}>
-                  <View style={styles.feedbackLeft}>
-                    <View style={[styles.iconBox, { backgroundColor: '#fffbeb' }]}>
-                      <FontAwesome5 name="star" size={12} color="#d97706" />
+                        {/* Tags or Feedback */}
+                        {item.tags && item.tags.length > 0 && (
+                            <View style={styles.tagsRow}>
+                                {item.tags.map((tag, idx) => (
+                                    <View key={idx} style={[styles.tag, { backgroundColor: '#f0fdf4', borderColor: '#dcfce7' }]}>
+                                        <Text style={[styles.tagText, { color: '#15803d' }]}>{tag}</Text>
+                                    </View>
+                                ))}
+                            </View>
+                        )}
+                        {item.feedback ? (
+                             <Text style={styles.commentText}>"{item.feedback}"</Text>
+                        ) : null}
                     </View>
-                    <Text style={styles.feedbackCategory}>Class Behavior</Text>
-                  </View>
-                  <Text style={styles.feedbackDate}>2 days ago</Text>
+                ))}
                 </View>
-                <Text style={styles.commentText}>"Active participation in Science class today."</Text>
-              </View>
-            </View>
+            )}
 
           </View>
         </ScrollView>
 
         {/* FIXED BOTTOM NAV */}
         <View style={styles.bottomNav}>
-          <TouchableOpacity style={styles.navItem}>
+          <TouchableOpacity style={styles.navItem} onPress={() => fetchDashboard()}>
             <FontAwesome5 name="home" size={20} color="#4f46e5" />
             <Text style={[styles.navLabel, { color: '#4f46e5' }]}>Home</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.navItem}>
+          <TouchableOpacity style={styles.navItem} onPress={() => navigation.navigate('StudentProfile')}>
             <FontAwesome5 name="user" size={20} color="#94a3b8" />
             <Text style={styles.navLabel}>Profile</Text>
           </TouchableOpacity>
@@ -358,7 +413,7 @@ const styles = StyleSheet.create({
   sidebar: { position: "absolute", left: 0, top: 0, bottom: 0, width: SIDEBAR_WIDTH, backgroundColor: "#fff", zIndex: 101, elevation: 20, shadowColor: "#000", shadowOffset: { width: 2, height: 0 }, shadowOpacity: 0.25, shadowRadius: 3.84 },
   sidebarSafeArea: { flex: 1, backgroundColor: '#fff' },
   sidebarContainer: { flex: 1, paddingHorizontal: 20, paddingBottom: 20, justifyContent: 'space-between' },
-  sidebarContentWrapper: { flex: 1 }, // Added to ensure top content takes available space
+  sidebarContentWrapper: { flex: 1 },
   
   sidebarHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 20, marginBottom: 10, paddingBottom: 20, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
   avatarLarge: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#fff', borderWidth: 2, borderColor: '#e0e7ff', justifyContent: 'center', alignItems: 'center' },
@@ -384,6 +439,7 @@ const styles = StyleSheet.create({
   
   /* Sibling Switcher */
   siblingPill: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#f8fafc', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, borderWidth: 1, borderColor: '#e2e8f0' },
+  siblingPillDisabled: { backgroundColor: 'transparent', borderWidth: 0, paddingHorizontal: 0 },
   miniAvatar: { width: 24, height: 24, borderRadius: 12, backgroundColor: '#e0e7ff', justifyContent: 'center', alignItems: 'center' },
   miniAvatarText: { fontSize: 10, fontWeight: 'bold', color: '#4f46e5' },
   siblingName: { flex: 1, fontSize: 14, fontWeight: 'bold', color: '#334155' },
@@ -409,7 +465,7 @@ const styles = StyleSheet.create({
   heroButtonText: { fontSize: 14, fontWeight: 'bold', color: '#4f46e5' },
 
   /* To Do */
-  taskCard: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#fff', padding: 16, borderRadius: 16, borderWidth: 1, borderColor: '#e2e8f0', borderLeftWidth: 4, borderLeftColor: '#4f46e5' },
+  taskCard: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#fff', padding: 16, borderRadius: 16, borderWidth: 1, borderColor: '#e2e8f0', borderLeftWidth: 4, borderLeftColor: '#4f46e5', marginBottom: 12 },
   taskInfo: { flex: 1 },
   taskTitle: { fontSize: 14, fontWeight: 'bold', color: '#1e293b', marginBottom: 4 },
   timerRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
@@ -429,17 +485,17 @@ const styles = StyleSheet.create({
   stars: { flexDirection: 'row', gap: 2 },
   goodWorkText: { fontSize: 12, fontWeight: 'bold', color: '#334155' },
   
-  tagsRow: { flexDirection: 'row', gap: 8 },
+  tagsRow: { flexDirection: 'row', gap: 8, marginBottom: 8 },
   tag: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6, borderWidth: 1 },
   tagText: { fontSize: 10, fontWeight: 'bold' },
   commentText: { fontSize: 12, color: '#64748b', fontStyle: 'italic', paddingLeft: 32 },
 
   /* Empty State */
-  emptyState: { padding: 20, alignItems: 'center', backgroundColor: '#fff', borderRadius: 16, borderStyle: 'dashed', borderWidth: 1, borderColor: '#cbd5e1' },
-  emptyText: { color: '#94a3b8', fontSize: 12 },
+  emptyState: { padding: 30, alignItems: 'center', backgroundColor: '#fff', borderRadius: 16, borderStyle: 'dashed', borderWidth: 1, borderColor: '#cbd5e1' },
+  emptyText: { color: '#94a3b8', fontSize: 14, fontWeight: '500' },
 
   /* Bottom Nav */
   bottomNav: { flexDirection: 'row', backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#e2e8f0', paddingVertical: 10, paddingBottom: Platform.OS === 'ios' ? 25 : 10, justifyContent: 'space-around', alignItems: 'center', elevation: 10 },
   navItem: { alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20 },
   navLabel: { fontSize: 10, fontWeight: '600', color: '#94a3b8', marginTop: 4 },
-});
+});       

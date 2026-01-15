@@ -1,6 +1,8 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
+import { View, ActivityIndicator } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Screens
 import LoginScreen from './src/screens/LoginScreen';
@@ -52,16 +54,56 @@ import StudentQuizResultScreen from './src/screens/Student/Quiz/StudentQuizResul
 const Stack = createNativeStackNavigator();
 
 export default function App() {
+  const [isLoading, setIsLoading] = useState(true);
+  const [initialRoute, setInitialRoute] = useState('Login');
+
+  useEffect(() => {
+    const checkLoginStatus = async () => {
+      try {
+        // 1. Check for stored credentials
+        const token = await AsyncStorage.getItem('token');
+        const role = await AsyncStorage.getItem('role');
+
+        // 2. Determine where to go
+        if (token && role) {
+          if (role === 'teacher') {
+            setInitialRoute('TeacherDash');
+          } else if (role === 'parent' || role === 'student') {
+            setInitialRoute('StudentDash');
+          } else if (role === 'admin') {
+            setInitialRoute('AdminDash');
+          }
+        }
+      } catch (error) {
+        console.error("Auth check failed:", error);
+      } finally {
+        // 3. Stop loading and render the App
+        setIsLoading(false);
+      }
+    };
+
+    checkLoginStatus();
+  }, []);
+
+  // Show a blank loading screen while checking storage
+  if (isLoading) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' }}>
+        <ActivityIndicator size="large" color="#4f46e5" />
+      </View>
+    );
+  }
+
   return (
     <NavigationContainer>
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Navigator initialRouteName={initialRoute} screenOptions={{ headerShown: false }}>
 
         {/* Root */}
         <Stack.Screen name="Login" component={LoginScreen} />
 
         {/* Student */}
         <Stack.Screen name="StudentDash" component={StudentDashScreen} />
-        <Stack.Screen name="AudioRecord" component={AudioRecordScreen} />
+        <Stack.Screen name="AudioRecorder" component={AudioRecordScreen} />
         <Stack.Screen name="StudentNoticBoard" component={StudentNoticBoardScreen} />
         <Stack.Screen name="StudentProfile" component={StudentProfileScreen} />
         <Stack.Screen name="StudentResource" component={StudentResourceScreen} />
@@ -106,4 +148,4 @@ export default function App() {
       </Stack.Navigator>
     </NavigationContainer>
   );
-}
+};
