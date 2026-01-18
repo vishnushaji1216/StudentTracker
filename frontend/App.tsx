@@ -42,7 +42,7 @@ import QuizEditScreen from './src/screens/Teacher/Quiz/QuizEditScreen';
 // Student
 import StudentDashScreen from './src/screens/Student/StudentDashScreen';
 import AudioRecordScreen from './src/screens/Student/AudioRecorderScreen';
-import StudentNoticBoardScreen from './src/screens/Student/StudentNoticeBoardScreen';
+import StudentNoticeBoardScreen from './src/screens/Student/StudentNoticeBoardScreen';
 import StudentProfileScreen from './src/screens/Student/StudentProfileScreen';
 import StudentResourceScreen from './src/screens/Student/StudentResourceScreen'
 import StudentStatsScreen from './src/screens/Student/StudentStatsScreen';
@@ -104,7 +104,7 @@ export default function App() {
         {/* Student */}
         <Stack.Screen name="StudentDash" component={StudentDashScreen} />
         <Stack.Screen name="AudioRecorder" component={AudioRecordScreen} />
-        <Stack.Screen name="StudentNoticBoard" component={StudentNoticBoardScreen} />
+        <Stack.Screen name="StudentNoticeBoard" component={StudentNoticeBoardScreen} />
         <Stack.Screen name="StudentProfile" component={StudentProfileScreen} />
         <Stack.Screen name="StudentResource" component={StudentResourceScreen} />
         <Stack.Screen name="StudentStats" component={StudentStatsScreen} />

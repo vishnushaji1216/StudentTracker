@@ -3,6 +3,9 @@ import Assignment from "../models/assignment.model.js";
 import Submission from "../models/submission.model.js";
 import Syllabus from "../models/syllabus.model.js";
 import Teacher from "../models/teacher.model.js";
+import fs from 'fs';
+import { uploadFileToSupabase } from "../services/supabase.js";
+import Announcement from "../models/announcement.model.js";
 
 export const getStudentDashboard = async (req, res) => {
     try {
@@ -200,4 +203,137 @@ export const getStudentProfile = async (req, res) => {
       console.error("Profile Error:", error);
       res.status(500).json({ message: "Failed to load profile" });
     }
+};
+
+export const submitAssignment = async (req, res) => {
+  try {
+    // 1. Check if file exists (Multer should have caught it, but double check)
+    if (!req.file) {
+      return res.status(400).json({ message: "No file uploaded" });
+    }
+
+    const { assignmentId, type } = req.body;
+    const studentId = req.user.id;
+    const file = req.file;
+
+    console.log(`📂 Processing ${type} submission for Student ${studentId}`);
+
+    // 2. Prepare for Supabase
+    // Read file from the 'uploads' folder
+    const fileBuffer = fs.readFileSync(file.path);
+    
+    // Create a clean filename: "studentId_timestamp.ext"
+    const fileExt = file.originalname.split('.').pop();
+    const uniqueFileName = `${studentId}_${Date.now()}.${fileExt}`;
+    
+    // Decide folder based on type
+    const folderName = type === 'audio' ? 'submissions/audio' : 'submissions/handwriting';
+
+    // 3. Upload using your Helper
+    const publicUrl = await uploadFileToSupabase(
+      fileBuffer,
+      uniqueFileName,
+      file.mimetype,
+      folderName
+    );
+
+    // 4. Clean up local temp file
+    fs.unlinkSync(file.path);
+
+    // 5. Save/Update Submission in MongoDB
+    let submission = await Submission.findOne({ 
+      student: studentId, 
+      assignment: assignmentId 
+    });
+
+    if (submission) {
+      // Update existing submission (Re-submission)
+      submission.fileUrl = publicUrl;
+      submission.status = 'Submitted'; // Reset status if it was graded
+      submission.submittedAt = Date.now();
+      await submission.save();
+    } else {
+      // Create new submission
+      submission = await Submission.create({
+        student: studentId,
+        assignment: assignmentId,
+        type: type, // 'audio' or 'handwriting'
+        fileUrl: publicUrl,
+        status: 'Submitted',
+        submittedAt: Date.now()
+      });
+    }
+
+    res.status(201).json({ 
+      message: "Assignment submitted successfully!", 
+      submission 
+    });
+
+  } catch (error) {
+    console.error("❌ Submission Controller Error:", error);
+    
+    // Cleanup: If file exists but upload failed, delete it
+    if (req.file && req.file.path) {
+        try { fs.unlinkSync(req.file.path); } catch(e) {}
+    }
+    
+    res.status(500).json({ message: "Server error during submission" });
+  }
+};
+
+export const getStudentNotices = async (req, res) => {
+  try {
+    const studentId = req.user.id;
+    
+    // 1. Get Student Info to find their Class
+    const student = await Student.findById(studentId);
+    if (!student) return res.status(404).json({ message: "Student not found" });
+
+    // 2. Query the Announcement Model
+    const notices = await Announcement.find({
+      $or: [
+        { targetAudience: 'Everyone' }, // Global School News
+        { targetAudience: 'Parents' },  // Visible to Student/Parent login
+        { 
+          targetAudience: 'Class', 
+          targetClass: student.className // Specific Class News (e.g., "9-A")
+        }
+      ]
+    })
+    .sort({ createdAt: -1 }) // Newest first
+    .lean();
+
+    // 3. Format data to match what the App UI expects
+    const formattedNotices = notices.map(note => {
+        // Determine "School" vs "Class" type for the Tabs
+        // Admin = School Tab, Teacher = Class Tab
+        const isSchool = note.sender.role === 'admin'; 
+
+        return {
+            id: note._id,
+            type: isSchool ? 'school' : 'class', // For the 'School'/'Class' filter tabs
+            priority: note.isUrgent ? 'urgent' : 'normal', // Map boolean to string
+            
+            sender: note.sender.name || (isSchool ? "Admin Office" : "Class Teacher"),
+            role: isSchool ? "Administration" : "Teacher",
+            
+            title: note.title,
+            message: note.message,
+            date: new Date(note.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric' }) + 
+                  ' • ' + 
+                  new Date(note.createdAt).toLocaleTimeString([], { hour: '2-digit', minute:'2-digit'}),
+            
+            // UI Styling Helpers
+            icon: isSchool ? 'school' : 'chalkboard-teacher',
+            iconColor: isSchool ? '#ef4444' : '#4f46e5',
+            bgIcon: isSchool ? '#fef2f2' : '#eef2ff'
+        };
+    });
+
+    res.json(formattedNotices);
+
+  } catch (error) {
+    console.error("Announcement Fetch Error:", error);
+    res.status(500).json({ message: "Failed to fetch announcements" });
+  }
 };

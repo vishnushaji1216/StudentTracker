@@ -10,33 +10,27 @@ import {
   BackHandler,
   Platform,
   Dimensions,
-  UIManager,
   ActivityIndicator,
-  RefreshControl
+  RefreshControl,
+  Alert
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import FontAwesome5 from "react-native-vector-icons/FontAwesome5";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect } from "@react-navigation/native";
-import api from "../../services/api"; // Ensure this path is correct
-
-// Enable Animations
-if (Platform.OS === 'android') {
-  if (UIManager.setLayoutAnimationEnabledExperimental) {
-    UIManager.setLayoutAnimationEnabledExperimental(true);
-  }
-}
+import api from "../../services/api";
 
 const { width } = Dimensions.get('window');
 const SIDEBAR_WIDTH = Math.min(280, width * 0.8);
 
 export default function StudentDashScreen({ navigation }) {
-  // Sidebar State
+  // --- STATE: Sidebar ---
+  // Start closed (-SIDEBAR_WIDTH)
   const slideAnim = useRef(new Animated.Value(-SIDEBAR_WIDTH)).current;
   const overlayAnim = useRef(new Animated.Value(0)).current;
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
-  // Data State
+  // --- STATE: Data ---
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [dashboardData, setDashboardData] = useState({
@@ -47,7 +41,11 @@ export default function StudentDashScreen({ navigation }) {
     feedback: []
   });
 
-  // Handle Android Back Button
+  // --- STATE: Toast ---
+  const [toast, setToast] = useState({ visible: false, message: '', type: 'info' });
+  const toastAnim = useRef(new Animated.Value(100)).current;
+
+  // --- HANDLER: Back Button ---
   useEffect(() => {
     const backHandler = BackHandler.addEventListener("hardwareBackPress", () => {
       if (isSidebarOpen) {
@@ -59,7 +57,7 @@ export default function StudentDashScreen({ navigation }) {
     return () => backHandler.remove();
   }, [isSidebarOpen]);
 
-  // Fetch Data on Focus
+  // --- HANDLER: Fetch Data ---
   useFocusEffect(
     useCallback(() => {
       fetchDashboard();
@@ -72,6 +70,7 @@ export default function StudentDashScreen({ navigation }) {
       setDashboardData(response.data);
     } catch (error) {
       console.log("Dashboard fetch error:", error);
+      showToast("Failed to load dashboard", "error");
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -83,27 +82,40 @@ export default function StudentDashScreen({ navigation }) {
     fetchDashboard();
   };
 
-  const toggleSidebar = () => {
-    const isOpen = isSidebarOpen;
-    setIsSidebarOpen(!isOpen);
-
-    Animated.parallel([
-      Animated.timing(slideAnim, { 
-        toValue: isOpen ? -SIDEBAR_WIDTH : 0, 
-        duration: 300, 
-        useNativeDriver: true 
-      }),
-      Animated.timing(overlayAnim, { 
-        toValue: isOpen ? 0 : 0.5, 
-        duration: 300, 
-        useNativeDriver: true 
-      }),
-    ]).start();
+  // --- ACTION: Show Toast ---
+  const showToast = (message, type = 'success') => {
+    setToast({ visible: true, message, type });
+    Animated.spring(toastAnim, { toValue: 0, useNativeDriver: true, friction: 8 }).start();
+    setTimeout(() => {
+      Animated.timing(toastAnim, { toValue: 100, duration: 300, useNativeDriver: true })
+        .start(() => setToast(prev => ({ ...prev, visible: false })));
+    }, 2500);
   };
 
-  const handleNav = (screen) => {
-    toggleSidebar();
-    navigation.navigate(screen);
+  // --- ACTION: Sidebar (FIXED ANIMATION) ---
+  const toggleSidebar = () => {
+    if (isSidebarOpen) {
+      // CLOSING: Animate First, Then Update State
+      Animated.parallel([
+        Animated.timing(slideAnim, { toValue: -SIDEBAR_WIDTH, duration: 300, useNativeDriver: true }),
+        Animated.timing(overlayAnim, { toValue: 0, duration: 300, useNativeDriver: true }),
+      ]).start(() => {
+        setIsSidebarOpen(false); // Unmount overlay only after animation ends
+      });
+    } else {
+      // OPENING: Update State First (to render overlay), Then Animate
+      setIsSidebarOpen(true);
+      Animated.parallel([
+        Animated.timing(slideAnim, { toValue: 0, duration: 300, useNativeDriver: true }),
+        Animated.timing(overlayAnim, { toValue: 1, duration: 300, useNativeDriver: true }),
+      ]).start();
+    }
+  };
+
+  const handleNav = (screen, params = {}) => {
+    toggleSidebar(); // Will use the new safe closing logic
+    // Add small delay to allow sidebar to start closing before pushing new screen
+    setTimeout(() => navigation.navigate(screen, params), 50);
   };
 
   const handleLogout = async () => {
@@ -115,7 +127,7 @@ export default function StudentDashScreen({ navigation }) {
     }
   };
 
-  // Helper: Check if date is within last 2 days
+  // Helper: Date Check
   const isRecent = (dateString) => {
     const date = new Date(dateString);
     const twoDaysAgo = new Date();
@@ -123,73 +135,28 @@ export default function StudentDashScreen({ navigation }) {
     return date >= twoDaysAgo;
   };
 
-  const recentFeedback = dashboardData.feedback.filter(item => isRecent(item.updatedAt));
+  const getTaskId = (task) => {
+      return task.id || task._id; 
+  };
 
   if (loading) {
     return (
-        <View style={{flex:1, justifyContent:'center', alignItems:'center', backgroundColor: "#F8FAFC"}}>
+        <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color="#4f46e5" />
         </View>
     );
   }
 
   const { student, hasSiblings, dailyMission, pendingList } = dashboardData;
+  const recentFeedback = dashboardData.feedback.filter(item => isRecent(item.updatedAt));
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#fff" />
 
-      {/* --- SIDEBAR OVERLAY --- */}
-      <Animated.View
-        style={[
-          styles.overlay, 
-          { 
-            opacity: overlayAnim,
-            transform: [{ translateX: isSidebarOpen ? 0 : -width }] 
-          }
-        ]}
-      >
-        <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={toggleSidebar} />
-      </Animated.View>
-
-      {/* --- SIDEBAR DRAWER --- */}
-      <Animated.View style={[styles.sidebar, { transform: [{ translateX: slideAnim }] }]}>
-        <SafeAreaView style={styles.sidebarSafeArea}>
-            <View style={styles.sidebarContainer}>
-            <View style={styles.sidebarContentWrapper}>
-                <View style={styles.sidebarHeader}>
-                    <View style={styles.avatarLarge}>
-                        <Text style={styles.avatarTextLarge}>{student.initials}</Text>
-                    </View>
-                    <View>
-                        <Text style={styles.sidebarName}>{student.name}</Text>
-                        <Text style={styles.sidebarClass}>{student.className}</Text>
-                    </View>
-                </View>
-
-                <ScrollView style={styles.menuScroll} contentContainerStyle={{paddingBottom: 20}} showsVerticalScrollIndicator={false}>
-                    <SidebarItem icon="home" label="Home" active onPress={() => handleNav('StudentDash')} />
-                    <SidebarItem icon="chart-bar" label="Academic Stats" onPress={() => handleNav('StudentStats')}/>
-                    <SidebarItem icon="folder-open" label="Resource Library" onPress={() => handleNav('StudentResource')}/>
-                    <SidebarItem icon="list-ol" label="Quiz Center" onPress={() => handleNav('StudentQuizCenter')}/>
-                    <SidebarItem icon="microphone" label="Daily Audio" onPress={() => handleNav('AudioRecorder')}/>
-                    <SidebarItem icon="bullhorn" label="Notice" onPress={() => handleNav('StudentNoticeBoard')} />
-                    <View style={styles.menuDivider} />
-                    <SidebarItem icon="question-circle" label="Help & Support" />
-                </ScrollView>
-            </View>
-
-            <View style={styles.sidebarFooter}>
-                <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
-                    <FontAwesome5 name="sign-out-alt" size={16} color="#ef4444" />
-                    <Text style={styles.logoutText}>Sign Out</Text>
-                </TouchableOpacity>
-            </View>
-            </View>
-        </SafeAreaView>
-      </Animated.View>
-
-      {/* --- MAIN CONTENT --- */}
+      {/* ======================================================= */}
+      {/* 1. MAIN CONTENT */}
+      {/* ======================================================= */}
       <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
         
         {/* Header */}
@@ -199,7 +166,6 @@ export default function StudentDashScreen({ navigation }) {
               <FontAwesome5 name="bars" size={20} color="#334155" />
             </TouchableOpacity>
             
-            {/* Sibling Switcher - ONLY IF HAS SIBLINGS */}
             <TouchableOpacity 
                 style={[styles.siblingPill, !hasSiblings && styles.siblingPillDisabled]}
                 disabled={!hasSiblings}
@@ -222,51 +188,65 @@ export default function StudentDashScreen({ navigation }) {
         >
           <View style={styles.contentPadding}>
             
-            {/* 1. TODAY'S MISSION (HERO) */}
+            {/* TODAY'S MISSION (HERO) */}
             <View style={styles.sectionMb}>
               <Text style={styles.sectionTitle}>TODAY'S MISSION</Text>
               
               {dailyMission ? (
                 <View style={styles.heroCard}>
-                  <View style={styles.heroContent}>
-                    {/* <View style={styles.blob1} />
-                    <View style={styles.blob2} /> */}
-                    
+                  <View style={[
+                      styles.heroContent,
+                      dailyMission.type === 'audio' && { backgroundColor: '#be123c' }
+                  ]}>
                     <View style={styles.heroTop}>
                       <View>
                         <View style={styles.heroBadge}>
                           <Text style={styles.heroBadgeText}>
-                            {dailyMission.type === 'audio' ? 'DAILY AUDIO' : 
-                             dailyMission.type === 'quiz' ? 'WEEKLY QUIZ' : 'HOMEWORK'}
+                            {dailyMission.type === 'audio' ? '🎙 AUDIO TASK' : 
+                             dailyMission.type === 'quiz' ? '📝 WEEKLY QUIZ' : '📘 HOMEWORK'}
                           </Text>
                         </View>
                         <Text style={styles.heroTitle}>{dailyMission.title}</Text>
-                        <Text style={styles.heroSub}>Due by {dailyMission.deadline}</Text>
+                        <Text style={styles.heroSub}>{dailyMission.subject || "General"} • Due Today</Text>
                       </View>
                       
                       <View style={styles.heroIconBox}>
                         <FontAwesome5 
-                          name={
-                            dailyMission.type === 'audio' ? 'microphone' : 
-                            dailyMission.type === 'quiz' ? 'list-ol' : 'pen'
-                          } 
-                          size={24} 
-                          color="#fff" 
+                          name={dailyMission.type === 'audio' ? 'microphone' : dailyMission.type === 'quiz' ? 'list-ol' : 'pen'} 
+                          size={24} color="#fff" 
                         />
                       </View>
                     </View>
 
                     <TouchableOpacity 
-                      style={styles.heroButton}
+                      style={[
+                          styles.heroButton,
+                          dailyMission.type === 'audio' && { backgroundColor: '#fff' }
+                      ]}
                       activeOpacity={0.9}
                       onPress={() => {
-                          if (dailyMission.type === 'audio') navigation.navigate('AudioRecorder');
-                          else if (dailyMission.type === 'quiz') navigation.navigate('StudentQuizCenter');
-                          else console.log('Homework details');
+                          if (dailyMission.type === 'audio') {
+                            navigation.navigate('AudioRecorder', { 
+                              assignmentId: getTaskId(dailyMission), 
+                              taskTitle: dailyMission.title
+                            });
+                          } else if (dailyMission.type === 'quiz') {
+                            navigation.navigate('StudentQuizCenter');
+                          } else {
+                            showToast("View details in pending list", "info");
+                          }
                       }}
                     >
-                      <FontAwesome5 name="play-circle" size={16} color="#4f46e5" />
-                      <Text style={styles.heroButtonText}>
+                      <FontAwesome5 
+                        name={dailyMission.type === 'audio' ? 'circle' : 'play-circle'} 
+                        size={16} 
+                        color={dailyMission.type === 'audio' ? '#be123c' : '#4f46e5'} 
+                        solid
+                      />
+                      <Text style={[
+                          styles.heroButtonText,
+                          dailyMission.type === 'audio' && { color: '#be123c' }
+                      ]}>
                         {dailyMission.type === 'audio' ? 'Start Recording' : 
                          dailyMission.type === 'quiz' ? 'Start Quiz' : 'View Details'}
                       </Text>
@@ -281,13 +261,13 @@ export default function StudentDashScreen({ navigation }) {
               )}
             </View>
 
-            {/* 2. PENDING TASKS */}
+            {/* PENDING TASKS */}
             <View style={styles.sectionMb}>
               <Text style={styles.sectionTitle}>TO DO LIST</Text>
               
               {pendingList.length > 0 ? (
                  pendingList.map((task) => (
-                    <View key={task.id} style={styles.taskCard}>
+                    <View key={getTaskId(task) || Math.random()} style={styles.taskCard}>
                         <View style={styles.taskInfo}>
                             <Text style={styles.taskTitle}>{task.title}</Text>
                             <View style={styles.timerRow}>
@@ -298,8 +278,14 @@ export default function StudentDashScreen({ navigation }) {
                         <TouchableOpacity 
                             style={styles.startBtn}
                             onPress={() => {
-                                if (task.type === 'audio') navigation.navigate('AudioRecorder');
-                                else if (task.type === 'quiz') navigation.navigate('StudentQuizCenter');
+                                if (task.type === 'audio') {
+                                    navigation.navigate('AudioRecorder', { 
+                                        assignmentId: getTaskId(task), 
+                                        taskTitle: task.title 
+                                    });
+                                } else if (task.type === 'quiz') {
+                                    navigation.navigate('StudentQuizCenter');
+                                }
                             }}
                         >
                             <Text style={styles.startBtnText}>
@@ -316,57 +302,34 @@ export default function StudentDashScreen({ navigation }) {
               )}
             </View>
 
-            {/* 3. RECENT FEEDBACK */}
+            {/* RECENT FEEDBACK */}
             {recentFeedback.length > 0 && (
                 <View style={styles.sectionMb}>
                 <Text style={styles.sectionTitle}>TEACHER FEEDBACK (LAST 2 DAYS)</Text>
-                
                 {recentFeedback.map((item) => (
-                    <View key={item._id} style={styles.feedbackCard}>
+                    <View key={item._id || item.id} style={styles.feedbackCard}>
                         <View style={styles.feedbackHeader}>
-                        <View style={styles.feedbackLeft}>
-                            <View style={[styles.iconBox, { backgroundColor: '#faf5ff' }]}>
-                                <FontAwesome5 
-                                    name={item.type === 'Handwriting' ? 'pen-fancy' : 'comment'} 
-                                    size={12} color="#9333ea" 
-                                />
+                            <View style={styles.feedbackLeft}>
+                                <View style={[styles.iconBox, { backgroundColor: '#faf5ff' }]}>
+                                    <FontAwesome5 name={item.type === 'Handwriting' ? 'pen-fancy' : 'comment'} size={12} color="#9333ea" />
+                                </View>
+                                <Text style={styles.feedbackCategory}>{item.type || 'Review'}</Text>
                             </View>
-                            <Text style={styles.feedbackCategory}>{item.type || 'Review'}</Text>
-                        </View>
-                        <Text style={styles.feedbackDate}>Just Now</Text>
+                            <Text style={styles.feedbackDate}>Recent</Text>
                         </View>
                         
-                        {/* Stars */}
                         <View style={styles.starRow}>
-                        <View style={styles.stars}>
-                            {[1, 2, 3, 4, 5].map((s) => (
-                                <FontAwesome5 
-                                    key={s} 
-                                    name="star" 
-                                    solid={s <= item.obtainedMarks} 
-                                    size={12} 
-                                    color={s <= item.obtainedMarks ? "#fbbf24" : "#cbd5e1"} 
-                                />
-                            ))}
-                        </View>
-                        <Text style={styles.goodWorkText}>
-                            {item.obtainedMarks >= 4 ? "Good Work!" : "Keep Improving"}
-                        </Text>
-                        </View>
-
-                        {/* Tags or Feedback */}
-                        {item.tags && item.tags.length > 0 && (
-                            <View style={styles.tagsRow}>
-                                {item.tags.map((tag, idx) => (
-                                    <View key={idx} style={[styles.tag, { backgroundColor: '#f0fdf4', borderColor: '#dcfce7' }]}>
-                                        <Text style={[styles.tagText, { color: '#15803d' }]}>{tag}</Text>
-                                    </View>
+                            <View style={styles.stars}>
+                                {[1, 2, 3, 4, 5].map((s) => (
+                                    <FontAwesome5 key={s} name="star" solid={s <= item.obtainedMarks} size={12} color={s <= item.obtainedMarks ? "#fbbf24" : "#cbd5e1"} />
                                 ))}
                             </View>
-                        )}
-                        {item.feedback ? (
-                             <Text style={styles.commentText}>"{item.feedback}"</Text>
-                        ) : null}
+                            <Text style={styles.goodWorkText}>
+                                {item.obtainedMarks >= 4 ? "Good Work!" : "Keep Improving"}
+                            </Text>
+                        </View>
+
+                        {item.feedback ? <Text style={styles.commentText}>"{item.feedback}"</Text> : null}
                     </View>
                 ))}
                 </View>
@@ -389,11 +352,107 @@ export default function StudentDashScreen({ navigation }) {
         </View>
 
       </SafeAreaView>
+
+      {/* ======================================================= */}
+      {/* 2. SIDEBAR & OVERLAY */}
+      {/* ======================================================= */}
+      
+      {/* --- OVERLAY --- */}
+      {isSidebarOpen && (
+        <Animated.View style={[styles.overlay, { opacity: overlayAnim }]}>
+           <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={toggleSidebar} />
+        </Animated.View>
+      )}
+
+      {/* --- SIDEBAR DRAWER --- */}
+      <Animated.View style={[styles.sidebar, { transform: [{ translateX: slideAnim }] }]}>
+        <SafeAreaView style={styles.sidebarSafeArea}>
+            <View style={styles.sidebarContainer}>
+            <View style={{flex: 1}}>
+                {/* HEADER WITH CLOSE BUTTON */}
+                <View style={styles.sidebarHeader}>
+                    <View style={{flexDirection:'row', alignItems:'center', gap:10}}>
+                        <View style={styles.avatarLarge}>
+                            <Text style={styles.avatarTextLarge}>{student.initials}</Text>
+                        </View>
+                        <View>
+                            <Text style={styles.sidebarName}>{student.name}</Text>
+                            <Text style={styles.sidebarClass}>{student.className}</Text>
+                        </View>
+                    </View>
+                    <TouchableOpacity onPress={toggleSidebar} style={{padding:5}}>
+                        <FontAwesome5 name="times" size={18} color="#94a3b8" />
+                    </TouchableOpacity>
+                </View>
+
+                <ScrollView style={styles.menuScroll} contentContainerStyle={{paddingBottom: 20}} showsVerticalScrollIndicator={false}>
+                    <SidebarItem icon="home" label="Home" active onPress={() => handleNav('StudentDash')} />
+                    <SidebarItem icon="chart-bar" label="Academic Stats" onPress={() => handleNav('StudentStats')}/>
+                    <SidebarItem icon="folder-open" label="Resource Library" onPress={() => handleNav('StudentResource')}/>
+                    <SidebarItem icon="list-ol" label="Quiz Center" onPress={() => handleNav('StudentQuizCenter')}/>
+                    
+                    <SidebarItem 
+                        icon="microphone" 
+                        label="Daily Audio" 
+                        onPress={() => {
+                            if (dailyMission && dailyMission.type === 'audio') {
+                                handleNav('AudioRecorder', { 
+                                    assignmentId: getTaskId(dailyMission), 
+                                    taskTitle: dailyMission.title 
+                                });
+                                return;
+                            }
+                            const pendingAudio = pendingList.find(t => t.type === 'audio');
+                            if (pendingAudio) {
+                                handleNav('AudioRecorder', { 
+                                    assignmentId: getTaskId(pendingAudio), 
+                                    taskTitle: pendingAudio.title 
+                                });
+                                return;
+                            }
+                            // Just close sidebar if no task, but show toast
+                            toggleSidebar();
+                            setTimeout(() => showToast("No active audio tasks found.", "info"), 300);
+                        }}
+                    />
+                    
+                    <SidebarItem icon="bullhorn" label="Notice" onPress={() => handleNav('StudentNoticeBoard')} />
+                </ScrollView>
+            </View>
+
+            <View style={styles.sidebarFooter}>
+                <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
+                    <FontAwesome5 name="sign-out-alt" size={16} color="#ef4444" />
+                    <Text style={styles.logoutText}>Sign Out</Text>
+                </TouchableOpacity>
+            </View>
+            </View>
+        </SafeAreaView>
+      </Animated.View>
+
+      {/* --- CUSTOM TOAST --- */}
+      {toast.visible && (
+        <Animated.View 
+          style={[
+            styles.toast, 
+            toast.type === 'error' ? styles.toastError : 
+            toast.type === 'info' ? styles.toastInfo : styles.toastSuccess,
+            { transform: [{ translateY: toastAnim }] }
+          ]}
+        >
+           <FontAwesome5 
+              name={toast.type === 'error' ? 'exclamation-circle' : toast.type === 'info' ? 'info-circle' : 'check-circle'} 
+              size={16} color="#fff" 
+           />
+           <Text style={styles.toastText}>{toast.message}</Text>
+        </Animated.View>
+      )}
+
     </View>
   );
 }
 
-/* --- SUB-COMPONENTS --- */
+// --- SUB-COMPONENTS ---
 const SidebarItem = ({ icon, label, onPress, active }) => (
   <TouchableOpacity style={[styles.sidebarItem, active && styles.sidebarItemActive]} onPress={onPress}>
     <View style={{ width: 30, alignItems: 'center' }}>
@@ -403,41 +462,41 @@ const SidebarItem = ({ icon, label, onPress, active }) => (
   </TouchableOpacity>
 );
 
-/* --- STYLES --- */
+// --- STYLES ---
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F8FAFC" },
   safeArea: { flex: 1 },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: "#F8FAFC" },
+
+  /* Toast */
+  toast: { position: 'absolute', bottom: 90, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, paddingHorizontal: 20, borderRadius: 30, zIndex: 999, elevation: 10, shadowColor: '#000', shadowOpacity: 0.2, shadowOffset: {width: 0, height: 4} },
+  toastSuccess: { backgroundColor: '#16a34a' },
+  toastError: { backgroundColor: '#ef4444' },
+  toastInfo: { backgroundColor: '#3b82f6' },
+  toastText: { color: '#fff', fontWeight: 'bold', fontSize: 14 },
 
   /* Sidebar */
   overlay: { position: "absolute", top: 0, bottom: 0, left: 0, right: 0, backgroundColor: "rgba(0,0,0,0.5)", zIndex: 100 },
-  sidebar: { position: "absolute", left: 0, top: 0, bottom: 0, width: SIDEBAR_WIDTH, backgroundColor: "#fff", zIndex: 101, elevation: 20, shadowColor: "#000", shadowOffset: { width: 2, height: 0 }, shadowOpacity: 0.25, shadowRadius: 3.84 },
+  sidebar: { position: "absolute", left: 0, top: 0, bottom: 0, width: SIDEBAR_WIDTH, backgroundColor: "#fff", zIndex: 101, elevation: 20 },
   sidebarSafeArea: { flex: 1, backgroundColor: '#fff' },
   sidebarContainer: { flex: 1, paddingHorizontal: 20, paddingBottom: 20, justifyContent: 'space-between' },
-  sidebarContentWrapper: { flex: 1 },
-  
-  sidebarHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 20, marginBottom: 10, paddingBottom: 20, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
+  sidebarHeader: { flexDirection: 'row', alignItems: 'center', justifyContent:'space-between', marginTop: 20, marginBottom: 10, paddingBottom: 20, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
   avatarLarge: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#fff', borderWidth: 2, borderColor: '#e0e7ff', justifyContent: 'center', alignItems: 'center' },
   avatarTextLarge: { fontSize: 18, fontWeight: 'bold', color: '#4f46e5' },
   sidebarName: { fontSize: 16, fontWeight: 'bold', color: '#1e293b' },
   sidebarClass: { fontSize: 12, color: '#64748b' },
-  
   menuScroll: { marginTop: 10 },
-  menuDivider: { height: 1, backgroundColor: '#f1f5f9', marginVertical: 10 },
-  menuSectionLabel: { fontSize: 10, fontWeight: 'bold', color: '#94a3b8', marginBottom: 8, marginLeft: 12, letterSpacing: 0.5 },
   sidebarItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 8, borderRadius: 12, marginBottom: 2 },
   sidebarItemActive: { backgroundColor: '#eef2ff' },
   sidebarItemText: { fontSize: 14, fontWeight: '600', color: '#64748b', marginLeft: 8 },
-  
   sidebarFooter: { borderTopWidth: 1, borderTopColor: '#f1f5f9', paddingTop: 15 },
   logoutBtn: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10 },
   logoutText: { color: '#ef4444', fontWeight: 'bold' },
 
   /* Header */
   header: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 12, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
-  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 16, width: '100%' },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 16 },
   menuButton: { padding: 4 },
-  
-  /* Sibling Switcher */
   siblingPill: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#f8fafc', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, borderWidth: 1, borderColor: '#e2e8f0' },
   siblingPillDisabled: { backgroundColor: 'transparent', borderWidth: 0, paddingHorizontal: 0 },
   miniAvatar: { width: 24, height: 24, borderRadius: 12, backgroundColor: '#e0e7ff', justifyContent: 'center', alignItems: 'center' },
@@ -453,8 +512,6 @@ const styles = StyleSheet.create({
   /* Hero Card */
   heroCard: { borderRadius: 20, overflow: 'hidden', shadowColor: '#4f46e5', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 },
   heroContent: { backgroundColor: '#4f46e5', padding: 20 },
-  blob1: { position: 'absolute', top: -20, right: -20, width: 90, height: 90, borderRadius: 45, backgroundColor: 'rgba(255,255,255,0.1)' },
-  blob2: { position: 'absolute', bottom: -10, left: -10, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.1)' },
   heroTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 },
   heroBadge: { backgroundColor: 'rgba(255,255,255,0.2)', alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, marginBottom: 8 },
   heroBadgeText: { fontSize: 10, fontWeight: 'bold', color: '#fff', textTransform: 'uppercase' },
@@ -480,14 +537,9 @@ const styles = StyleSheet.create({
   iconBox: { width: 24, height: 24, borderRadius: 8, justifyContent: 'center', alignItems: 'center' },
   feedbackCategory: { fontSize: 12, fontWeight: 'bold', color: '#334155' },
   feedbackDate: { fontSize: 10, color: '#94a3b8' },
-  
   starRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12, backgroundColor: '#f8fafc', padding: 8, borderRadius: 8 },
   stars: { flexDirection: 'row', gap: 2 },
   goodWorkText: { fontSize: 12, fontWeight: 'bold', color: '#334155' },
-  
-  tagsRow: { flexDirection: 'row', gap: 8, marginBottom: 8 },
-  tag: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6, borderWidth: 1 },
-  tagText: { fontSize: 10, fontWeight: 'bold' },
   commentText: { fontSize: 12, color: '#64748b', fontStyle: 'italic', paddingLeft: 32 },
 
   /* Empty State */
@@ -498,4 +550,4 @@ const styles = StyleSheet.create({
   bottomNav: { flexDirection: 'row', backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#e2e8f0', paddingVertical: 10, paddingBottom: Platform.OS === 'ios' ? 25 : 10, justifyContent: 'space-around', alignItems: 'center', elevation: 10 },
   navItem: { alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20 },
   navLabel: { fontSize: 10, fontWeight: '600', color: '#94a3b8', marginTop: 4 },
-});       
+});

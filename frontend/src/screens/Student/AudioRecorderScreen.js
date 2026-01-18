@@ -9,318 +9,397 @@ import {
   Animated,
   Dimensions,
   StatusBar,
-  ScrollView,
-  BackHandler,
-  ActivityIndicator
+  ActivityIndicator,
+  Alert
 } from 'react-native';
-import AudioRecorderPlayer from 'react-native-audio-recorder-player';
+import AudioRecord from 'react-native-audio-record';
+import Sound from 'react-native-sound';
 import FontAwesome5 from 'react-native-vector-icons/FontAwesome5';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from '../../services/api';
 
 const { width } = Dimensions.get('window');
-const SIDEBAR_WIDTH = Math.min(280, width * 0.8);
 
 export default function AudioRecorderScreen({ navigation, route }) {
-  // --- REFS (Lazy Init) ---
-  // We initialize the player inside a ref to prevent top-level crashes
-  const audioRecorderPlayer = useRef(new AudioRecorderPlayer()).current;
+  // --- PARAMS ---
+  const assignmentId = route.params?.assignmentId;
+  const taskTitle = route.params?.taskTitle || "Audio Assignment";
+  const passedSubmission = route.params?.submission;
+
+  const hasActiveTask = !!assignmentId || !!passedSubmission;
 
   // --- STATE ---
   const [isRecording, setIsRecording] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [recordTime, setRecordTime] = useState('00:00');
-  const [playTime, setPlayTime] = useState('00:00');
-  const [duration, setDuration] = useState('00:00');
-  const [audioPath, setAudioPath] = useState(null);
+  const [audioPath, setAudioPath] = useState(null); 
   const [uploading, setUploading] = useState(false);
-
-  // Sidebar State
-  const slideAnim = useRef(new Animated.Value(-SIDEBAR_WIDTH)).current;
-  const overlayAnim = useRef(new Animated.Value(0)).current;
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-
-  // Toast State
+  const [loadingTask, setLoadingTask] = useState(hasActiveTask); 
+  const [isSubmitted, setIsSubmitted] = useState(false); 
+  
+  // Timer & Anim
+  const [recordDuration, setRecordDuration] = useState(0); 
+  const [playbackTime, setPlaybackTime] = useState(0);     
+  const timerInterval = useRef(null);
+  const soundRef = useRef(null);
+  
+  // Visuals
+  const waveAnims = useRef([...Array(6)].map(() => new Animated.Value(10))).current; // Reduced bars for cleaner look
   const [toast, setToast] = useState({ visible: false, message: '', type: 'success' });
   const toastAnim = useRef(new Animated.Value(100)).current;
 
-  // Cleanup on Unmount
+  // --- INITIALIZATION ---
   useEffect(() => {
+    if (hasActiveTask) {
+        const options = {
+          sampleRate: 16000,
+          channels: 1,
+          bitsPerSample: 16,
+          audioSource: 6,
+          wavFile: 'test.wav'
+        };
+        AudioRecord.init(options);
+        Sound.setCategory('Playback');
+        checkSubmissionStatus();
+    }
     return () => {
-      // Stop everything when leaving the screen
-      try {
-        audioRecorderPlayer.stopRecorder();
-        audioRecorderPlayer.stopPlayer();
-        audioRecorderPlayer.removeRecordBackListener();
-        audioRecorderPlayer.removePlayBackListener();
-      } catch (e) {
-        console.log("Cleanup error (harmless):", e);
-      }
+      stopTimer();
+      stopWaveAnimation();
+      if (soundRef.current) soundRef.current.release();
     };
-  }, []);
+  }, [assignmentId]);
 
-  // Handle Back Button
-  useEffect(() => {
-    const backHandler = BackHandler.addEventListener("hardwareBackPress", () => {
-      if (isSidebarOpen) {
-        toggleSidebar();
-        return true;
-      }
-      return false;
-    });
-    return () => backHandler.remove();
-  }, [isSidebarOpen]);
-
-  // --- TOAST FUNCTION ---
-  const showToast = (message, type = 'success') => {
-    setToast({ visible: true, message, type });
-    Animated.spring(toastAnim, { toValue: 0, useNativeDriver: true, friction: 8 }).start();
-    setTimeout(() => {
-      Animated.timing(toastAnim, { toValue: 100, duration: 300, useNativeDriver: true }).start(() => setToast(prev => ({ ...prev, visible: false })));
-    }, 2500);
-  };
-
-  // --- SIDEBAR FUNCTIONS ---
-  const toggleSidebar = () => {
-    const isOpen = !isSidebarOpen;
-    setIsSidebarOpen(isOpen);
-    Animated.parallel([
-      Animated.timing(slideAnim, { toValue: isOpen ? 0 : -SIDEBAR_WIDTH, duration: 300, useNativeDriver: true }),
-      Animated.timing(overlayAnim, { toValue: isOpen ? 1 : 0, duration: 300, useNativeDriver: true }),
-    ]).start();
-  };
-
-  const handleNav = (screen) => {
-    toggleSidebar();
-    navigation.navigate(screen);
-  };
-
-  const handleLogout = async () => {
+  // --- FETCH STATUS ---
+  const checkSubmissionStatus = async () => {
     try {
-      await AsyncStorage.multiRemove(["token", "user", "role"]);
-      navigation.replace("Login");
+      if (passedSubmission) {
+        handleExistingSubmission(passedSubmission);
+        return;
+      }
+      const response = await api.get(`/student/assignments/${assignmentId}/status`);
+      if (response.data?.submission) {
+        handleExistingSubmission(response.data.submission);
+      } else {
+        setLoadingTask(false);
+      }
     } catch (error) {
-      console.log("Logout error:", error);
+      console.log("Status check failed:", error);
+      setLoadingTask(false);
     }
   };
 
-  // --- RECORDER LOGIC ---
-  const checkPermissions = async () => {
-    if (Platform.OS === 'android') {
-      try {
-        const grants = await PermissionsAndroid.requestMultiple([
-          PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE,
-          PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE,
-          PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
-        ]);
+  const handleExistingSubmission = (submission) => {
+    setIsSubmitted(true);
+    const fullUrl = submission.fileUrl.startsWith('http') 
+        ? submission.fileUrl 
+        : `${api.defaults.baseURL.replace('/api', '')}${submission.fileUrl}`;
+    setAudioPath(fullUrl);
+    setLoadingTask(false);
+  };
 
-        if (grants['android.permission.RECORD_AUDIO'] === PermissionsAndroid.RESULTS.GRANTED) {
-          return true;
-        }
-        showToast('Microphone permission required', 'error');
-        return false;
-      } catch (err) {
-        console.warn(err);
-        return false;
+  // --- WAVEFORM ANIMATION ---
+  const startWaveAnimation = () => {
+    Animated.loop(
+      Animated.stagger(150, waveAnims.map(anim => Animated.sequence([
+        Animated.timing(anim, { toValue: Math.random() * 50 + 20, duration: 250, useNativeDriver: false }),
+        Animated.timing(anim, { toValue: 10, duration: 250, useNativeDriver: false })
+      ])))
+    ).start();
+  };
+  const stopWaveAnimation = () => waveAnims.forEach(anim => anim.setValue(10));
+
+  // --- TIMER LOGIC ---
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins < 10 ? '0' + mins : mins}:${secs < 10 ? '0' + secs : secs}`;
+  };
+
+  const startRecordTimer = () => {
+    setRecordDuration(0);
+    clearInterval(timerInterval.current);
+    timerInterval.current = setInterval(() => setRecordDuration(p => p + 1), 1000);
+  };
+
+  const startPlaybackTimer = () => {
+    setPlaybackTime(0);
+    clearInterval(timerInterval.current);
+    timerInterval.current = setInterval(() => {
+      if (soundRef.current && soundRef.current.isLoaded()) {
+        soundRef.current.getCurrentTime((seconds) => setPlaybackTime(seconds));
+      }
+    }, 100);
+  };
+  const stopTimer = () => clearInterval(timerInterval.current);
+
+  // --- RECORDING ---
+  const onStartRecord = async () => {
+    if (isSubmitted || !hasActiveTask) return; 
+
+    if (Platform.OS === 'android') {
+      const granted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.RECORD_AUDIO);
+      if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+        showToast('Microphone permission denied', 'error');
+        return;
       }
     }
-    return true;
-  };
-
-  const onStartRecord = async () => {
-    const hasPermission = await checkPermissions();
-    if (!hasPermission) return;
 
     try {
-      const result = await audioRecorderPlayer.startRecorder();
-      audioRecorderPlayer.addRecordBackListener((e) => {
-        setRecordTime(audioRecorderPlayer.mmssss(Math.floor(e.currentPosition)));
-      });
-      setAudioPath(result);
+      setAudioPath(null);
+      AudioRecord.start();
+      startRecordTimer();
+      startWaveAnimation();
       setIsRecording(true);
       setIsPlaying(false);
     } catch (error) {
-      console.log("Record Error:", error);
-      showToast('Failed to start recording', 'error');
+      console.log('Record Error:', error);
     }
   };
 
   const onStopRecord = async () => {
+    if (!isRecording) return;
     try {
-      const result = await audioRecorderPlayer.stopRecorder();
-      audioRecorderPlayer.removeRecordBackListener();
+      const filePath = await AudioRecord.stop();
+      stopTimer();
+      stopWaveAnimation();
       setIsRecording(false);
-      setAudioPath(result);
+      setAudioPath(filePath);
     } catch (error) {
-      console.log('Stop Record Error:', error);
+      console.log('Stop Error:', error);
     }
   };
 
-  const onStartPlay = async () => {
+  // --- PLAYBACK ---
+  const onStartPlay = () => {
     if (!audioPath) return;
-    try {
-      await audioRecorderPlayer.startPlayer(audioPath);
-      audioRecorderPlayer.addPlayBackListener((e) => {
-        if (e.currentPosition === e.duration) {
-          onStopPlay();
-        }
-        setPlayTime(audioRecorderPlayer.mmssss(Math.floor(e.currentPosition)));
-        setDuration(audioRecorderPlayer.mmssss(Math.floor(e.duration)));
+
+    setIsPlaying(true);
+    startPlaybackTimer();
+    startWaveAnimation();
+
+    soundRef.current = new Sound(audioPath, isSubmitted ? null : '', (error) => {
+      if (error) {
+        setIsPlaying(false);
+        stopTimer();
+        stopWaveAnimation();
+        showToast('Failed to load audio', 'error');
+        return;
+      }
+      if (isSubmitted) setRecordDuration(soundRef.current.getDuration());
+
+      soundRef.current.play(() => {
+        setIsPlaying(false);
+        stopTimer();
+        stopWaveAnimation();
+        setPlaybackTime(recordDuration);
       });
-      setIsPlaying(true);
-    } catch (error) {
-      showToast('Playback failed', 'error');
-    }
+    });
   };
 
-  const onStopPlay = async () => {
-    try {
-      await audioRecorderPlayer.stopPlayer();
-      audioRecorderPlayer.removePlayBackListener();
-      setIsPlaying(false);
-      setPlayTime('00:00');
-    } catch (error) {
-      console.log('Stop Play Error:', error);
-    }
+  const onStopPlay = () => {
+    if (soundRef.current) soundRef.current.stop();
+    setIsPlaying(false);
+    stopTimer();
+    stopWaveAnimation();
   };
 
+  // --- SUBMISSION ---
   const handleSubmit = async () => {
-    if (!audioPath) return;
+    if (!audioPath || isSubmitted || !hasActiveTask) return;
+
     setUploading(true);
     try {
       const formData = new FormData();
-      const fileType = Platform.OS === 'android' ? 'audio/mp4' : 'audio/m4a';
-      const fileName = `audio_submission_${Date.now()}.mp4`;
-
-      formData.append('file', {
-        uri: audioPath,
-        type: fileType,
-        name: fileName,
-      });
       
-      const assignmentId = route.params?.assignmentId || 'GENERAL_SUBMISSION'; 
+      // 1. Ensure path has file:// prefix (Android requirement)
+      let uri = audioPath;
+      if (Platform.OS === 'android' && !uri.startsWith('file://')) {
+        uri = `file://${uri}`;
+      }
+
+      // 2. Append File
+      formData.append('file', {
+        uri: uri,
+        type: 'audio/wav', 
+        name: `submission_${Date.now()}.wav`,
+      });
+
+      // 3. Append Other Data
       formData.append('assignmentId', assignmentId);
       formData.append('type', 'audio');
 
+      // 4. LOG FOR DEBUGGING (Check your terminal!)
+      console.log("Submitting Audio:", formData);
+
+      // 5. THE FIX: Let Axios handle the Content-Type automatically!
+      // Do NOT manually set 'Content-Type': 'multipart/form-data' here.
+      // It breaks the boundary generation.
       await api.post('/student/submit', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
+        headers: {
+            'Accept': 'application/json',
+            // 'Content-Type': 'multipart/form-data', <--- DELETE THIS LINE
+        },
+        transformRequest: (data, headers) => {
+            return data; // Fixes a common Axios bug with FormData
+        },
       });
 
       showToast('Assignment submitted successfully!', 'success');
+      setIsSubmitted(true);
       setTimeout(() => navigation.goBack(), 2000);
-
+      
     } catch (error) {
-      console.error('Upload Error:', error);
-      showToast('Failed to upload audio', 'error');
+      console.error("UPLOAD ERROR DETAILS:", error.response ? error.response.data : error.message);
+      showToast('Failed to upload audio. Check logs.', 'error');
     } finally {
       setUploading(false);
     }
   };
 
+  const showToast = (message, type = 'success') => {
+    setToast({ visible: true, message, type });
+    Animated.spring(toastAnim, { toValue: 0, useNativeDriver: true }).start();
+    setTimeout(() => {
+      Animated.timing(toastAnim, { toValue: 100, duration: 300, useNativeDriver: true }).start(() => setToast(prev => ({ ...prev, visible: false })));
+    }, 2500);
+  };
+
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#1e1b4b" />
-      
-      {/* SIDEBAR OVERLAY */}
-      {isSidebarOpen && (
-        <Animated.View style={[styles.overlay, { opacity: overlayAnim }]}>
-           <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={toggleSidebar} />
-        </Animated.View>
-      )}
+      <StatusBar barStyle="dark-content" backgroundColor="#fff" />
 
-      {/* SIDEBAR DRAWER */}
-      <Animated.View style={[styles.sidebar, { transform: [{ translateX: slideAnim }] }]}>
-        <SafeAreaView style={styles.sidebarSafeArea}>
-            <View style={styles.sidebarHeader}>
-                <View style={styles.avatarLarge}>
-                    <Text style={styles.avatarTextLarge}>ST</Text>
-                </View>
-                <Text style={styles.sidebarName}>Student Menu</Text>
-            </View>
-
-            <ScrollView style={{ marginTop: 20 }}>
-                <SidebarItem icon="home" label="Home" onPress={() => handleNav('StudentDash')} />
-                <SidebarItem icon="chart-bar" label="Academic Stats" onPress={() => handleNav('StudentStats')} />
-                <SidebarItem icon="folder-open" label="Resource Library" onPress={() => handleNav('StudentResource')} />
-                <SidebarItem icon="list-ol" label="Quiz Center" onPress={() => handleNav('StudentQuizCenter')} />
-                <SidebarItem icon="microphone" label="Audio Recorder" active />
-            </ScrollView>
-
-            <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
-                <FontAwesome5 name="sign-out-alt" size={16} color="#ef4444" />
-                <Text style={styles.logoutText}>Sign Out</Text>
-            </TouchableOpacity>
-        </SafeAreaView>
-      </Animated.View>
-
-      {/* MAIN CONTENT */}
       <SafeAreaView style={styles.safeArea}>
+        {/* HEADER */}
         <View style={styles.header}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 15 }}>
-            <TouchableOpacity onPress={toggleSidebar} style={styles.iconBtn}>
-              <FontAwesome5 name="bars" size={20} color="#fff" />
+            <View /> 
+            <Text style={styles.headerTitle}>Audio Task</Text>
+            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.closeBtn}>
+                <FontAwesome5 name="times" size={18} color="#64748b" />
             </TouchableOpacity>
-            <Text style={styles.headerTitle}>Audio Recorder</Text>
-          </View>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.iconBtn}>
-            <FontAwesome5 name="times" size={20} color="#fff" />
-          </TouchableOpacity>
         </View>
 
-        <View style={styles.timerContainer}>
-           <View style={[styles.pulseCircle, isRecording && styles.pulseActive]}>
-              <FontAwesome5 name={isPlaying ? "play" : "microphone"} size={40} color="#fff" />
-           </View>
-           <Text style={styles.timerText}>
-              {isRecording ? recordTime : (isPlaying ? playTime : (audioPath ? "Recorded" : "00:00"))}
-           </Text>
-           <Text style={styles.statusText}>
-              {isRecording ? "Recording in progress..." : (isPlaying ? "Playing preview..." : (audioPath ? "Ready to submit" : "Tap mic to start"))}
-           </Text>
-        </View>
+        {loadingTask && (
+            <View style={styles.centerContainer}>
+                <ActivityIndicator size="large" color="#4f46e5" />
+                <Text style={styles.loadingText}>Loading Assignment...</Text>
+            </View>
+        )}
 
-        <View style={styles.controlsContainer}>
-            {!isPlaying && (
-              <TouchableOpacity 
-                style={[styles.recordBtn, isRecording && styles.stopBtn]} 
-                onPress={isRecording ? onStopRecord : onStartRecord}
-                disabled={uploading}
-              >
-                 <FontAwesome5 name={isRecording ? "stop" : "microphone"} size={24} color={isRecording ? "#ef4444" : "#fff"} />
-              </TouchableOpacity>
-            )}
-            {!isRecording && audioPath && (
-               <TouchableOpacity style={styles.playBtn} onPress={isPlaying ? onStopPlay : onStartPlay} disabled={uploading}>
-                  <FontAwesome5 name={isPlaying ? "stop" : "play"} size={20} color="#fff" />
-                  <Text style={styles.btnLabel}>{isPlaying ? "Stop" : "Preview"}</Text>
-               </TouchableOpacity>
-            )}
-        </View>
+        {/* ❌ NO TASK STATE */}
+        {!loadingTask && !hasActiveTask && (
+             <View style={styles.centerContainer}>
+                 <View style={styles.emptyStateCard}>
+                    <FontAwesome5 name="microphone-slash" size={32} color="#cbd5e1" />
+                    <Text style={styles.emptyTitle}>No Task Selected</Text>
+                    <Text style={styles.emptySub}>Please select a task from the dashboard.</Text>
+                    <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+                        <Text style={styles.backBtnText}>Go Back</Text>
+                    </TouchableOpacity>
+                 </View>
+             </View>
+        )}
 
-        {audioPath && !isRecording && !isPlaying && (
-           <View style={styles.footer}>
-              <TouchableOpacity style={[styles.submitBtn, uploading && styles.disabledBtn]} onPress={handleSubmit} disabled={uploading}>
-                 {uploading ? (
-                    <ActivityIndicator color="#fff" />
-                 ) : (
-                    <>
-                      <FontAwesome5 name="paper-plane" size={16} color="#fff" />
-                      <Text style={styles.submitText}>Submit Homework</Text>
-                    </>
-                 )}
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.retryBtn} onPress={() => { setAudioPath(null); setRecordTime('00:00'); }} disabled={uploading}>
-                 <Text style={styles.retryText}>Discard & Try Again</Text>
-              </TouchableOpacity>
-           </View>
+        {/* ✅ ACTIVE TASK STATE */}
+        {!loadingTask && hasActiveTask && (
+            <View style={styles.mainContent}>
+                
+                {/* 1. TASK INFO CARD */}
+                <View style={styles.taskCard}>
+                    <View style={styles.taskIconBox}>
+                        <FontAwesome5 name="book-open" size={16} color="#4f46e5" />
+                    </View>
+                    <View style={{flex:1}}>
+                        <Text style={styles.taskLabel}>TOPIC TO RECORD</Text>
+                        <Text style={styles.taskTitle}>{taskTitle}</Text>
+                    </View>
+                    {isSubmitted && <View style={styles.sentTag}><Text style={styles.sentText}>SENT</Text></View>}
+                </View>
+
+                {/* 2. DYNAMIC CONTENT AREA */}
+                
+                {/* STATE A: READY (Not recorded yet, not recording) */}
+                {!isRecording && !audioPath && !isSubmitted && (
+                    <View style={styles.stateContainer}>
+                        <View style={styles.illustrationCircle}>
+                             <FontAwesome5 name="microphone" size={40} color="#cbd5e1" />
+                        </View>
+                        <Text style={styles.instructionText}>Tap the button below to start recording your answer.</Text>
+                        
+                        <TouchableOpacity style={styles.startBtn} onPress={onStartRecord}>
+                            <View style={styles.startBtnInner}>
+                                <FontAwesome5 name="circle" solid size={14} color="#fff" />
+                            </View>
+                            <Text style={styles.startBtnText}>Start Recording</Text>
+                        </TouchableOpacity>
+                    </View>
+                )}
+
+                {/* STATE B: RECORDING (Active) */}
+                {isRecording && (
+                    <View style={styles.stateContainer}>
+                         <View style={styles.visualizerContainer}>
+                            {waveAnims.map((anim, index) => (
+                                <Animated.View key={index} style={[styles.bar, { height: anim }]} />
+                            ))}
+                         </View>
+                         <Text style={styles.timerText}>{formatTime(recordDuration)}</Text>
+                         <Text style={styles.recordingStatus}>Recording in progress...</Text>
+                         
+                         <TouchableOpacity style={styles.stopBtn} onPress={onStopRecord}>
+                             <FontAwesome5 name="stop" size={20} color="#fff" />
+                         </TouchableOpacity>
+                    </View>
+                )}
+
+                {/* STATE C: REVIEW (Recorded, can play or submit) */}
+                {!isRecording && audioPath && (
+                    <View style={styles.stateContainer}>
+                        {/* Visualizer (Green for playback) */}
+                        <View style={styles.visualizerContainer}>
+                            {waveAnims.map((anim, index) => (
+                                <Animated.View key={index} style={[styles.bar, { height: anim, backgroundColor: '#10b981' }]} />
+                            ))}
+                        </View>
+                        
+                        <Text style={styles.timerText}>{formatTime(isPlaying ? playbackTime : recordDuration)}</Text>
+                        <Text style={styles.recordingStatus}>{isPlaying ? "Playing Preview..." : "Recording Complete"}</Text>
+
+                        <View style={styles.reviewControls}>
+                             {/* Play/Pause */}
+                             <TouchableOpacity style={styles.iconControlBtn} onPress={isPlaying ? onStopPlay : onStartPlay}>
+                                 <FontAwesome5 name={isPlaying ? "pause" : "play"} size={18} color="#fff" />
+                             </TouchableOpacity>
+
+                             {/* Submit (Only if not submitted) */}
+                             {!isSubmitted && (
+                                <TouchableOpacity style={styles.submitPill} onPress={handleSubmit} disabled={uploading}>
+                                    {uploading ? <ActivityIndicator color="#fff" size="small" /> : (
+                                        <>
+                                            <Text style={styles.submitText}>Submit</Text>
+                                            <FontAwesome5 name="paper-plane" size={14} color="#fff" />
+                                        </>
+                                    )}
+                                </TouchableOpacity>
+                             )}
+                        </View>
+                        
+                        {/* Discard Link */}
+                        {!isSubmitted && (
+                            <TouchableOpacity style={styles.discardBtn} onPress={() => { setAudioPath(null); setRecordDuration(0); }}>
+                                <Text style={styles.discardText}>Discard & Record Again</Text>
+                            </TouchableOpacity>
+                        )}
+                    </View>
+                )}
+
+            </View>
         )}
       </SafeAreaView>
 
       {/* TOAST */}
       {toast.visible && (
-        <Animated.View style={[styles.toast, toast.type === 'error' ? styles.toastError : styles.toastSuccess, { transform: [{ translateY: toastAnim }] }]}>
-           <FontAwesome5 name={toast.type === 'error' ? 'exclamation-circle' : 'check-circle'} size={16} color="#fff" />
+        <Animated.View style={[styles.toast, styles.toastSuccess, { transform: [{ translateY: toastAnim }] }]}>
+           <FontAwesome5 name="check-circle" size={16} color="#fff" />
            <Text style={styles.toastText}>{toast.message}</Text>
         </Animated.View>
       )}
@@ -328,52 +407,61 @@ export default function AudioRecorderScreen({ navigation, route }) {
   );
 }
 
-const SidebarItem = ({ icon, label, onPress, active }) => (
-  <TouchableOpacity style={[styles.sidebarItem, active && styles.sidebarItemActive]} onPress={onPress}>
-    <View style={{ width: 30, alignItems: 'center' }}>
-        <FontAwesome5 name={icon} size={16} color={active ? "#4f46e5" : "#64748b"} />
-    </View>
-    <Text style={[styles.sidebarItemText, active && { color: "#4f46e5", fontWeight: '700' }]}>{label}</Text>
-  </TouchableOpacity>
-);
-
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#1e1b4b' },
+  container: { flex: 1, backgroundColor: '#fff' },
   safeArea: { flex: 1 },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 20 },
-  headerTitle: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
-  iconBtn: { padding: 8 },
-  timerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  pulseCircle: { width: 100, height: 100, borderRadius: 50, backgroundColor: '#4338ca', justifyContent: 'center', alignItems: 'center', marginBottom: 24, borderWidth: 4, borderColor: '#6366f1' },
-  pulseActive: { backgroundColor: '#ef4444', borderColor: '#f87171' },
-  timerText: { color: '#fff', fontSize: 48, fontWeight: 'bold', fontVariant: ['tabular-nums'] },
-  statusText: { color: '#a5b4fc', marginTop: 8, fontSize: 14 },
-  controlsContainer: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 30, paddingBottom: 50 },
-  recordBtn: { width: 72, height: 72, borderRadius: 36, backgroundColor: '#4f46e5', justifyContent: 'center', alignItems: 'center', elevation: 10, shadowColor: '#4f46e5', shadowOpacity: 0.5, shadowRadius: 10 },
-  stopBtn: { backgroundColor: '#fff' },
-  playBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 12, paddingHorizontal: 24, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.1)' },
-  btnLabel: { color: '#fff', fontWeight: 'bold' },
-  footer: { padding: 24, paddingBottom: 40 },
-  submitBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, backgroundColor: '#4f46e5', paddingVertical: 16, borderRadius: 16, marginBottom: 12 },
-  disabledBtn: { opacity: 0.7 },
-  submitText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
-  retryBtn: { alignItems: 'center', paddingVertical: 12 },
-  retryText: { color: '#ef4444', fontSize: 14, fontWeight: 'bold' },
-  overlay: { position: "absolute", top: 0, bottom: 0, left: 0, right: 0, backgroundColor: "rgba(0,0,0,0.5)", zIndex: 100 },
-  sidebar: { position: "absolute", left: 0, top: 0, bottom: 0, width: SIDEBAR_WIDTH, backgroundColor: "#fff", zIndex: 101, elevation: 20 },
-  sidebarSafeArea: { flex: 1 },
-  sidebarHeader: { alignItems: 'center', paddingVertical: 30, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
-  avatarLarge: { width: 60, height: 60, borderRadius: 30, backgroundColor: '#e0e7ff', justifyContent: 'center', alignItems: 'center', marginBottom: 10 },
-  avatarTextLarge: { fontSize: 20, fontWeight: 'bold', color: '#4f46e5' },
-  sidebarName: { fontSize: 18, fontWeight: 'bold', color: '#1e293b' },
-  sidebarItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 20 },
-  sidebarItemActive: { backgroundColor: '#eef2ff', borderRightWidth: 4, borderRightColor: '#4f46e5' },
-  sidebarItemText: { fontSize: 14, fontWeight: '600', color: '#64748b', marginLeft: 12 },
-  logoutBtn: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 20, borderTopWidth: 1, borderTopColor: '#f1f5f9' },
-  logoutText: { color: '#ef4444', fontWeight: 'bold' },
-  toast: { position: 'absolute', bottom: 40, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, paddingHorizontal: 20, borderRadius: 30, zIndex: 999, elevation: 10 },
-  toastSuccess: { backgroundColor: '#16a34a' },
-  toastError: { backgroundColor: '#ef4444' },
-  toastText: { color: '#fff', fontWeight: 'bold', fontSize: 14 },
-});
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
+  headerTitle: { fontSize: 16, fontWeight: 'bold', color: '#1e293b' },
+  closeBtn: { padding: 8, backgroundColor: '#f1f5f9', borderRadius: 8 },
+  
+  centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
+  loadingText: { marginTop: 10, color: '#64748b' },
+  
+  /* Empty State */
+  emptyStateCard: { alignItems: 'center', padding: 20 },
+  emptyTitle: { fontSize: 18, fontWeight: 'bold', color: '#1e293b', marginTop: 10 },
+  emptySub: { color: '#64748b', marginTop: 5, marginBottom: 20 },
+  backBtn: { backgroundColor: '#4f46e5', paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8 },
+  backBtnText: { color: '#fff', fontWeight: 'bold' },
 
+  /* Main Content */
+  mainContent: { flex: 1, padding: 20, alignItems: 'center' },
+  
+  /* Task Card */
+  taskCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f8fafc', padding: 16, borderRadius: 16, width: '100%', marginBottom: 40, borderWidth: 1, borderColor: '#e2e8f0' },
+  taskIconBox: { width: 40, height: 40, borderRadius: 10, backgroundColor: '#eef2ff', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  taskLabel: { fontSize: 10, fontWeight: 'bold', color: '#64748b', letterSpacing: 0.5 },
+  taskTitle: { fontSize: 16, fontWeight: 'bold', color: '#1e293b' },
+  sentTag: { backgroundColor: '#dcfce7', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
+  sentText: { fontSize: 10, fontWeight: 'bold', color: '#16a34a' },
+
+  /* State Container */
+  stateContainer: { alignItems: 'center', width: '100%' },
+  
+  /* Ready State */
+  illustrationCircle: { width: 120, height: 120, borderRadius: 60, backgroundColor: '#f8fafc', justifyContent: 'center', alignItems: 'center', marginBottom: 20, borderWidth: 4, borderColor: '#f1f5f9' },
+  instructionText: { textAlign: 'center', color: '#64748b', marginBottom: 30, maxWidth: '80%' },
+  startBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#ef4444', paddingVertical: 16, paddingHorizontal: 32, borderRadius: 30, gap: 10, elevation: 5, shadowColor: '#ef4444', shadowOpacity: 0.3, shadowRadius: 8 },
+  startBtnInner: { width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: '#fff', justifyContent: 'center', alignItems: 'center' },
+  startBtnText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+
+  /* Recording State */
+  visualizerContainer: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 60, marginBottom: 20 },
+  bar: { width: 8, backgroundColor: '#ef4444', borderRadius: 4 },
+  timerText: { fontSize: 48, fontWeight: 'bold', color: '#1e293b', fontVariant: ['tabular-nums'] },
+  recordingStatus: { color: '#64748b', marginBottom: 30 },
+  stopBtn: { width: 70, height: 70, borderRadius: 35, backgroundColor: '#ef4444', justifyContent: 'center', alignItems: 'center', elevation: 5 },
+
+  /* Review State */
+  reviewControls: { flexDirection: 'row', alignItems: 'center', gap: 20 },
+  iconControlBtn: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#4f46e5', justifyContent: 'center', alignItems: 'center' },
+  submitPill: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#4f46e5', paddingVertical: 14, paddingHorizontal: 24, borderRadius: 25 },
+  submitText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
+  discardBtn: { marginTop: 30, padding: 10 },
+  discardText: { color: '#ef4444', fontWeight: 'bold' },
+
+  /* Toast */
+  toast: { position: 'absolute', bottom: 40, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, paddingHorizontal: 20, borderRadius: 30, zIndex: 999 },
+  toastSuccess: { backgroundColor: '#16a34a' },
+  toastText: { color: '#fff', fontWeight: 'bold' },
+});
