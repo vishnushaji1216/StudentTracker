@@ -9,7 +9,7 @@ const AssignmentSchema = new mongoose.Schema({
 
   type: { 
     type: String, 
-    enum: ['homework', 'audio', 'quiz'], 
+    enum: ['homework', 'audio', 'quiz', 'exam'], 
     default: 'homework' 
   },
 

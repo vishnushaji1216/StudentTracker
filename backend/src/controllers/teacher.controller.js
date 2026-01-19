@@ -527,3 +527,72 @@ export const updateQuiz = async (req,res) => {
     res.status(500).json({ message: "update failed"});
   }
 }
+
+export const submitGradebook = async (req,res) => {
+  try {
+    const { className, subject, examTitle, totalMarks, studentMarks } = req.body;
+
+    const examEntry = await Assignment.create({
+      teacher: req.user.id, 
+      title: examTitle,
+      subject: subject,
+      className: className,
+      type: 'exam', 
+      totalMarks: Number(totalMarks),
+      status: 'Completed', 
+      dueDate: new Date()
+    });
+
+    const submissions = studentMarks.map(item => ({
+      student: item.studentId,
+      teacher: req.user.id,
+      assignment: examEntry._id,
+      type: 'exam', // Lowercase
+      status: 'Graded',
+      obtainedMarks: item.marks,
+      totalMarks: Number(totalMarks),
+      submittedAt: new Date()
+    }));
+
+    await Submission.insertMany(submissions);
+
+    res.status(201).json({ message: "Grades published successfully" });
+
+  } catch (error) {
+    console.error("Gradebook Error:", error);
+    res.status(500).json({ message: "Failed to publish grades" });
+  }
+}
+
+export const getTeacherStudents = async (req, res) => {
+  try {
+    const { className } = req.query;
+    // Fetch students belonging to this class
+    const students = await Student.find({ className }).select("name rollNo _id");
+    res.json(students);
+  } catch (error) {
+    res.status(500).json({ message: "Failed to fetch students" });
+  }
+};
+
+export const getTeacherSubjects = async (req, res) => {
+  try {
+    const { className } = req.query;
+    const teacherId = req.user.id;
+    
+    // Find teacher and look at their assignments/classes
+    const teacher = await Teacher.findById(teacherId);
+    
+    // Filter assignments where class matches
+    const subjects = teacher.assignments
+      .filter(a => a.class === className)
+      .map(a => a.subject);
+      
+    // Remove duplicates
+    const uniqueSubjects = [...new Set(subjects)];
+    
+    res.json(uniqueSubjects);
+  } catch (error) {
+    res.status(500).json({ message: "Failed to fetch subjects" });
+  }
+};

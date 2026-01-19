@@ -1,31 +1,40 @@
 import mongoose from 'mongoose';
 
 const SubmissionSchema = new mongoose.Schema({
-  // 1. MAKE ASSIGNMENT OPTIONAL
+  // 1. LINKING (The "Or" Logic)
   assignment: { 
     type: mongoose.Schema.Types.ObjectId, 
     ref: 'Assignment', 
-    required: false  // <--- CRITICAL FIX: Must be false
+    required: false 
+  },
+  
+  quiz: { 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: 'Quiz', 
+    required: false 
   },
 
   student: { type: mongoose.Schema.Types.ObjectId, ref: 'Student', required: true },
-  
-  // 2. Add Teacher so we know who reviewed it
   teacher: { type: mongoose.Schema.Types.ObjectId, ref: 'Teacher' },
 
-  // 3. Add 'Handwriting' to types
   type: {
     type: String,
-    enum: ['Quiz', 'Homework', 'Handwriting', 'Audio'], 
-    default: 'Homework'
+    enum: ['quiz', 'homework', 'handwriting', 'audio', 'exam'], 
+    default: 'homework'
   },
 
-  fileUrl: { type: String }, // For the Supabase image URL
-  contentUrl: { type: String }, // Backward compatibility
-  
-  feedback: { type: String },
-  tags: [String], // For ["Neat Work"] tags
+  obtainedMarks: { type: Number, default: 0 },
+  totalMarks: { type: Number, required: true, default: 5 },
 
+  status: { 
+    type: String, 
+    enum: ['pending', 'in-progress', 'submitted', 'graded', 'late', 'Graded'], 
+    default: 'pending' 
+  },
+
+  fileUrl: { type: String },
+  feedback: { type: String },
+  
   quizResponses: [
     {
       questionIndex: { type: Number },
@@ -34,19 +43,10 @@ const SubmissionSchema = new mongoose.Schema({
     }
   ],
 
-  // 4. ADD 'Graded' TO ENUM
-  status: { 
-    type: String, 
-    enum: ['pending', 'in-progress', 'submitted', 'graded', 'late', 'Graded'], // <--- CRITICAL FIX
-    default: 'pending' 
-  },
-
   attemptStartedAt: { type: Date },
   attemptEndedAt: { type: Date },
+  submittedAt: { type: Date, default: Date.now }
 
-  obtainedMarks: { type: Number, default: 0 },
-  totalMarks: { type: Number, default: 5 }, // Context for 5-star rating
-  submittedAt: { type: Date }
 }, { timestamps: true });
 
 export default mongoose.model('Submission', SubmissionSchema);

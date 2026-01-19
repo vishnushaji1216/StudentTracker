@@ -138,11 +138,12 @@ export default function TeacherSidebar({ navigation, isOpen, onClose, activeItem
               <View style={styles.menuDivider} />
               <Text style={styles.menuSectionLabel}>CONTENT & GRADING</Text>
               
+              <SidebarItem icon="clipboard-list" label="Gradebook" active={activeItem === 'Gradebook'} onPress={() => handleNav('Gradebook')} />
               <SidebarItem icon="list-ul" label="Quiz Manager" active={activeItem === 'QuizDashboard'} onPress={() => handleNav('QuizDashboard')} />
               <SidebarItem icon="pen-fancy" label="Handwriting Review" active={activeItem === 'HandwritingReview'} onPress={() => handleNav('HandwritingReview')} />
               <SidebarItem icon="headphones" label="Audio Review" active={activeItem === 'AudioReview'} onPress={() => handleNav('AudioReview')} />
               <SidebarItem icon="bullhorn" label="Notice Board" active={activeItem === 'NoticeBoard'} onPress={() => handleNav('NoticeBoard')} />
-              <SidebarItem icon="folder-open" label="Resource Library" active={activeItem === 'ResourceLibrary'} onPress={() => handleNav('ResourceLibrary')} />
+              {/* <SidebarItem icon="folder-open" label="Resource Library" active={activeItem === 'ResourceLibrary'} onPress={() => handleNav('ResourceLibrary')} /> */}
             </ScrollView>
           </View>
 

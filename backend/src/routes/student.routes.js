@@ -5,49 +5,42 @@ import {
   getStudentDashboard, 
   getStudentStats, 
   getStudentProfile,
-  submitAssignment // <--- Import the new function
+  submitAssignment,
+  getStudentNotices, // Don't forget this if you haven't added it
+  // --- NEW QUIZ IMPORTS ---
+  getAvailableQuizzes,
+  getQuizForStudent,
+  submitQuiz
 } from "../controllers/student.controller.js";
 import auth from "../middleware/auth.middleware.js";
 
 const router = express.Router();
 
-// --- 1. CONFIGURE MULTER (File Handler) ---
-// This saves the file temporarily to an 'uploads' folder
+// --- MULTER CONFIG (Keep existing) ---
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, 'uploads/'); // Make sure this folder exists in your root!
+    cb(null, 'uploads/'); 
   },
   filename: (req, file, cb) => {
-    // Naming: "timestamp-originalname"
     cb(null, Date.now() + path.extname(file.originalname));
   }
 });
 
-// Filter to allow Images AND Audio
 const fileFilter = (req, file, cb) => {
   const allowedTypes = [
-    'image/jpeg', 
-    'image/png', 
-    'image/jpg',
-    'audio/wav',      // <--- REQUIRED for Audio
-    'audio/mpeg',
-    'audio/m4a'
+    'image/jpeg', 'image/png', 'image/jpg',
+    'audio/wav', 'audio/mpeg', 'audio/m4a'
   ];
-
   if (allowedTypes.includes(file.mimetype)) {
     cb(null, true);
   } else {
-    cb(new Error('Invalid file type. Only images and audio are allowed!'), false);
+    cb(new Error('Invalid file type'), false);
   }
 };
 
-const upload = multer({ 
-  storage: storage,
-  fileFilter: fileFilter 
-});
+const upload = multer({ storage, fileFilter });
 
-
-// --- 2. MIDDLEWARE ---
+// --- MIDDLEWARE ---
 const studentCheck = (req, res, next) => {
     if (req.user.role !== 'parent' && req.user.role !== 'student') {
         return res.status(403).json({ message: "Access denied: Students only" });
@@ -55,13 +48,18 @@ const studentCheck = (req, res, next) => {
     next();
 };
 
-// --- 3. ROUTES ---
+// --- CORE ROUTES ---
 router.get("/dashboard", auth, studentCheck, getStudentDashboard);
 router.get("/stats", auth, studentCheck, getStudentStats);
 router.get("/profile", auth, studentCheck, getStudentProfile);
+router.get("/notices", auth, studentCheck, getStudentNotices);
 
-// ✅ NEW SUBMISSION ROUTE
-// 'file' must match the name used in FormData.append('file', ...)
+// --- ASSIGNMENT SUBMISSION ---
 router.post("/submit", auth, studentCheck, upload.single('file'), submitAssignment);
+
+// --- NEW QUIZ ROUTES ---
+router.get("/quizzes", auth, studentCheck, getAvailableQuizzes); // List of quizzes
+router.get("/quiz/:id", auth, studentCheck, getQuizForStudent); // Start specific quiz
+router.post("/quiz/submit", auth, studentCheck, submitQuiz); // Submit answers
 
 export default router;

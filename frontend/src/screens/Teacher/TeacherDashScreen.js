@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -6,8 +6,6 @@ import {
   StyleSheet,
   ScrollView,
   StatusBar,
-  Image,
-  Animated,
   BackHandler,
   Platform,
   Dimensions
@@ -15,65 +13,29 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import FontAwesome5 from "react-native-vector-icons/FontAwesome5";
 import Svg, { Path, Circle, Line, Defs, LinearGradient, Stop, Text as SvgText } from "react-native-svg";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-
-const SIDEBAR_WIDTH = 280;
-const { width } = Dimensions.get('window');
+import TeacherSidebar from "../../components/TeacherSidebar"; // <--- IMPORTED
 
 export default function TeacherDashScreen({ navigation }) {
-  // Sidebar State
-  const slideAnim = useRef(new Animated.Value(-SIDEBAR_WIDTH)).current;
-  const overlayAnim = useRef(new Animated.Value(0)).current;
+  // --- STATE ---
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [activeView, setActiveView] = useState('dashboard');
 
-  // Handle Android Back Button
+  // --- HANDLERS ---
+  const toggleSidebar = () => {
+    setIsSidebarOpen(!isSidebarOpen);
+  };
+
+  // Handle Android Hardware Back Button to close sidebar first
   useEffect(() => {
     const backHandler = BackHandler.addEventListener("hardwareBackPress", () => {
       if (isSidebarOpen) {
-        toggleSidebar();
+        setIsSidebarOpen(false);
         return true;
       }
       return false;
     });
     return () => backHandler.remove();
   }, [isSidebarOpen]);
-
-  const toggleSidebar = () => {
-    const isOpen = isSidebarOpen;
-    Animated.parallel([
-      Animated.timing(slideAnim, {
-        toValue: isOpen ? -SIDEBAR_WIDTH : 0,
-        duration: 300,
-        useNativeDriver: true,
-      }),
-      Animated.timing(overlayAnim, {
-        toValue: isOpen ? 0 : 0.5,
-        duration: 300,
-        useNativeDriver: true,
-      }),
-    ]).start();
-    setIsSidebarOpen(!isOpen);
-  };
-
-  const handleNav = (screen) => {
-    toggleSidebar();
-    navigation.navigate(screen);
-  };
-
-  const handleLogout = async () => {
-    try {
-      await AsyncStorage.multiRemove(["token", "user", "role"]);
-      navigation.replace("Login", { skipAnimation: true });
-    } catch (error) {
-      console.log("Logout error:", error);
-    }
-  };
-
-  const switchView = (viewName) => {
-    setActiveView(viewName);
-    toggleSidebar(); // Close sidebar on selection
-  };
 
   // Donut Chart Calc
   const donutSize = 100;
@@ -86,103 +48,13 @@ export default function TeacherDashScreen({ navigation }) {
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#fff" />
 
-      {/* --- SIDEBAR OVERLAY (Z-Index 50) --- */}
-      <Animated.View
-        style={[styles.overlay, { opacity: overlayAnim }]}
-        pointerEvents={isSidebarOpen ? "auto" : "none"}
-      >
-        <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={toggleSidebar} />
-      </Animated.View>
-
-      {/* --- SIDEBAR DRAWER (Z-Index 51) --- */}
-      <Animated.View style={[styles.sidebar, { transform: [{ translateX: slideAnim }] }]}>
-        <View style={styles.sidebarContainer}>
-          <View style={{ flex: 1 }}>
-            {/* Sidebar Header */}
-            <View style={styles.sidebarHeader}>
-              <Image 
-                source={{ uri: "https://i.pravatar.cc/150?img=5" }} 
-                style={styles.profilePic} 
-              />
-              <View>
-                <Text style={styles.teacherName}>Priya Sharma</Text>
-                <Text style={styles.teacherCode}>T-2025-08</Text>
-              </View>
-              <View style={styles.classTag}>
-                <Text style={styles.classTagText}>Class Teacher: 9-A</Text>
-              </View>
-            </View>
-
-            {/* Navigation Items (Corrected Teacher Menu) */}
-            <ScrollView style={styles.menuScroll} showsVerticalScrollIndicator={false}>
-              <SidebarItem 
-                icon="chart-pie" 
-                label="Dashboard" 
-                onPress={() => handleNav('TeacherDash')}
-                active={true} // <--- THIS IS THE DASHBOARD, SO IT IS ACTIVE
-              />
-              <SidebarItem 
-                icon="calendar-check" 
-                label="Daily Tasks" 
-                onPress={() => handleNav('DailyTask')}
-              />
-              <SidebarItem 
-                icon="chalkboard-teacher" 
-                label="My Classes" 
-                onPress={() => handleNav('MyClasses')}
-              />
-              <SidebarItem 
-                icon="users" 
-                label="Student Directory" 
-                onPress={() => handleNav('StudentDirectory')}
-              />
-              
-              <View style={styles.menuDivider} />
-              <Text style={styles.menuSectionLabel}>CONTENT & GRADING</Text>
-
-              <SidebarItem 
-                icon="list-ul" 
-                label="Quiz Manager" 
-                onPress={() => handleNav('QuizDashboard')}
-              />
-              <SidebarItem 
-                icon="pen-fancy" 
-                label="Handwriting Review" 
-                onPress={() => handleNav('HandwritingReview')}
-              />
-              <SidebarItem 
-                icon="headphones" 
-                label="Audio Review" 
-                onPress={() => handleNav('AudioReview')}
-              />
-              <SidebarItem 
-                icon="bullhorn" 
-                label="Notice Board" 
-                onPress={() => handleNav('NoticeBoard')}
-              />
-              <SidebarItem 
-                icon="folder-open" 
-                label="Resource Library" 
-                onPress={() => handleNav('ResourceLibrary')}
-              />
-
-              <View style={styles.menuDivider} />
-              <SidebarItem icon="question-circle" label="Help & Support" />
-            </ScrollView>
-          </View>
-
-          {/* Footer */}
-          <View style={styles.sidebarFooter}>
-            <TouchableOpacity style={styles.settingsBtn} onPress={() => handleNav('TeacherSetting')}>
-              <FontAwesome5 name="cog" size={16} color="#64748b" />
-              <Text style={styles.settingsText}>Settings</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
-              <FontAwesome5 name="sign-out-alt" size={16} color="#ef4444" />
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Animated.View>
+      {/* --- REUSABLE SIDEBAR COMPONENT --- */}
+      <TeacherSidebar 
+        navigation={navigation} 
+        isOpen={isSidebarOpen} 
+        onClose={() => setIsSidebarOpen(false)} 
+        activeItem="TeacherDash"
+      />
 
       {/* --- MAIN CONTENT --- */}
       <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
@@ -195,15 +67,11 @@ export default function TeacherDashScreen({ navigation }) {
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Dashboard</Text>
           </View>
-          {/* <View style={styles.bellContainer}>
-            <FontAwesome5 name="bell" size={20} color="#475569" />
-            <View style={styles.bellBadge} />
-          </View> */}
         </View>
 
         <ScrollView 
           style={styles.scrollContent} 
-          contentContainerStyle={{ paddingBottom: 120 }} // Padding for bottom nav
+          contentContainerStyle={{ paddingBottom: 120 }} 
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.contentPadding}>
@@ -241,7 +109,7 @@ export default function TeacherDashScreen({ navigation }) {
                   <Line x1="0" y1="50" x2="300" y2="50" stroke="#f8fafc" strokeWidth="1" />
                   <Line x1="0" y1="100" x2="300" y2="100" stroke="#f8fafc" strokeWidth="1" />
 
-                  {/* Path: 60 -> 40 -> 20 (Y-coordinates inverted for SVG) */}
+                  {/* Path */}
                   <Path 
                     d="M0,60 Q75,55 150,40 T300,20 L300,100 L0,100 Z" 
                     fill="url(#grad)" 
@@ -253,7 +121,7 @@ export default function TeacherDashScreen({ navigation }) {
                     strokeWidth="3" 
                   />
                   
-                  {/* Data Points with Labels */}
+                  {/* Data Points */}
                   <Circle cx="0" cy="60" r="3" fill="#4f46e5" />
                   <SvgText x="5" y="50" fontSize="10" fill="#4f46e5" fontWeight="bold">65%</SvgText>
                   
@@ -265,7 +133,6 @@ export default function TeacherDashScreen({ navigation }) {
                 </Svg>
               </View>
 
-              {/* X-Axis Labels */}
               <View style={styles.chartLabels}>
                 <Text style={styles.chartLabel}>Quiz 1</Text>
                 <Text style={styles.chartLabel}>Mid-Term</Text>
@@ -352,10 +219,8 @@ export default function TeacherDashScreen({ navigation }) {
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>QUICK ACTIONS</Text>
               <View style={styles.actionGrid}>
-                <ActionBtn label="Create Quiz" icon="plus-circle" color="#4f46e5" bg="#eef2ff" onPress={() => handleNav('QuizDashboard')} />
-                {/* <ActionBtn label="Upload Note" icon="cloud-upload-alt" color="#9333ea" bg="#faf5ff" /> */}
-                {/* <ActionBtn label="Log Behavior" icon="star" color="#d97706" bg="#fffbeb" /> */}
-                <ActionBtn label="Broadcast" icon="bullhorn" color="#db2777" bg="#fce7f3" onPress={() => handleNav('NoticeBoard')} />
+                <ActionBtn label="Create Quiz" icon="plus-circle" color="#4f46e5" bg="#eef2ff" onPress={() => navigation.navigate('QuizDashboard')} />
+                <ActionBtn label="Broadcast" icon="bullhorn" color="#db2777" bg="#fce7f3" onPress={() => navigation.navigate('NoticeBoard')} />
               </View>
             </View>
 
@@ -385,20 +250,9 @@ export default function TeacherDashScreen({ navigation }) {
   );
 }
 
-/* --- SUB-COMPONENTS --- */
-
-const SidebarItem = ({ icon, label, active, onPress }) => (
-  <TouchableOpacity 
-    style={[styles.sidebarItem, active && styles.sidebarItemActive]}
-    onPress={onPress}
-  >
-    <FontAwesome5 name={icon} size={16} color={active ? "#4f46e5" : "#64748b"} style={{ width: 24 }} />
-    <Text style={[styles.sidebarItemText, active && { color: "#4f46e5", fontWeight: '700' }]}>{label}</Text>
-  </TouchableOpacity>
-);
-
-const ActionBtn = ({ label, icon, color, bg }) => (
-  <TouchableOpacity style={[styles.actionBtn, { backgroundColor: bg }]}>
+// Sub-components
+const ActionBtn = ({ label, icon, color, bg, onPress }) => (
+  <TouchableOpacity style={[styles.actionBtn, { backgroundColor: bg }]} onPress={onPress}>
     <FontAwesome5 name={icon} size={20} color={color} style={{ marginBottom: 8 }} />
     <Text style={[styles.actionBtnText, { color }]}>{label}</Text>
   </TouchableOpacity>
@@ -409,35 +263,10 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F8FAFC" },
   safeArea: { flex: 1 },
 
-  /* Sidebar */
-  overlay: { position: "absolute", inset: 0, backgroundColor: "rgba(0,0,0,0.5)", zIndex: 50 },
-  sidebar: { position: "absolute", left: 0, top: 0, bottom: 0, width: SIDEBAR_WIDTH, backgroundColor: "#fff", zIndex: 51, elevation: 20 },
-  sidebarContainer: { flex: 1, paddingTop: Platform.OS === 'ios' ? 50 : 20, paddingHorizontal: 20, paddingBottom: 20, justifyContent: 'space-between' },
-  sidebarHeader: { marginBottom: 10,paddingBottom: 20,borderBottomWidth: 1, borderBottomColor: '#F1F5F9',flexDirection: 'column', gap: 12},
-  profileRow: {flexDirection: 'row',alignItems: 'center',gap: 12},
-  profilePic: { width: 50, height: 50, borderRadius: 25, borderWidth: 1, borderColor: '#e2e8f0' },
-  teacherName: { fontSize: 16, fontWeight: 'bold', color: '#1e293b' },
-  teacherCode: { fontSize: 12, color: '#64748b' },
-  classTag: { marginTop: 0, alignSelf: 'flex-start',  backgroundColor: '#eef2ff', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20, marginLeft: 62 },
-  classTagText: { fontSize: 10, fontWeight: 'bold', color: '#4f46e5', textTransform: 'uppercase' },
-  menuScroll: { marginTop: 20, flex: 1 },
-  menuDivider: { height: 1, backgroundColor: '#f1f5f9', marginVertical: 10 },
-  menuSectionLabel: { fontSize: 10, fontWeight: 'bold', color: '#94a3b8', marginBottom: 8, marginLeft: 12, letterSpacing: 0.5 },
-  sidebarItem: { flexDirection: 'row', alignItems: 'center', padding: 12, borderRadius: 12 },
-  sidebarItemActive: { backgroundColor: '#eef2ff' },
-  sidebarItemText: { fontSize: 14, fontWeight: '600', color: '#64748b' },
-  sidebarFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 10, borderTopWidth: 1, borderTopColor: '#f1f5f9' },
-  footerRow: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', alignItems: 'center', paddingHorizontal: 10 },
-  settingsBtn: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  settingsText: { fontSize: 14, fontWeight: '600', color: '#64748b' },
-  logoutBtn: { padding: 8, backgroundColor: '#fef2f2', borderRadius: 8 },
-
   /* Header */
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 16, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#1e293b' },
   menuButton: { padding: 4 },
-  bellContainer: { position: 'relative' },
-  bellBadge: { position: 'absolute', top: -2, right: -2, width: 10, height: 10, borderRadius: 5, backgroundColor: '#ef4444', borderWidth: 2, borderColor: '#fff' },
 
   /* Content */
   scrollContent: { flex: 1 },

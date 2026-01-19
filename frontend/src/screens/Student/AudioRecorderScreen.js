@@ -211,36 +211,28 @@ export default function AudioRecorderScreen({ navigation, route }) {
     try {
       const formData = new FormData();
       
-      // 1. Ensure path has file:// prefix (Android requirement)
       let uri = audioPath;
       if (Platform.OS === 'android' && !uri.startsWith('file://')) {
         uri = `file://${uri}`;
       }
 
-      // 2. Append File
       formData.append('file', {
         uri: uri,
         type: 'audio/wav', 
         name: `submission_${Date.now()}.wav`,
       });
 
-      // 3. Append Other Data
       formData.append('assignmentId', assignmentId);
       formData.append('type', 'audio');
 
-      // 4. LOG FOR DEBUGGING (Check your terminal!)
-      console.log("Submitting Audio:", formData);
-
-      // 5. THE FIX: Let Axios handle the Content-Type automatically!
-      // Do NOT manually set 'Content-Type': 'multipart/form-data' here.
-      // It breaks the boundary generation.
+      // --- THE FIX ---
       await api.post('/student/submit', formData, {
         headers: {
             'Accept': 'application/json',
-            // 'Content-Type': 'multipart/form-data', <--- DELETE THIS LINE
+            'Content-Type': 'multipart/form-data', // <--- UNCOMMENT THIS. React Native needs this explicit hint.
         },
         transformRequest: (data, headers) => {
-            return data; // Fixes a common Axios bug with FormData
+            return formData; // Return the formData object directly
         },
       });
 
@@ -249,8 +241,8 @@ export default function AudioRecorderScreen({ navigation, route }) {
       setTimeout(() => navigation.goBack(), 2000);
       
     } catch (error) {
-      console.error("UPLOAD ERROR DETAILS:", error.response ? error.response.data : error.message);
-      showToast('Failed to upload audio. Check logs.', 'error');
+      console.error("UPLOAD ERROR:", error);
+      showToast('Failed to upload audio.', 'error');
     } finally {
       setUploading(false);
     }
