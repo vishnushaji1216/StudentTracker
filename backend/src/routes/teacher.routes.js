@@ -8,7 +8,7 @@ import {
   postNotice,
   getNotices,
   deleteNotice,
-  getDirectory, // <--- Unified function for Directory AND Gradebook
+  getDirectory, 
   getClassDetail,
   updateClassStatus,
   createQuiz,
@@ -17,7 +17,8 @@ import {
   updateQuiz,
   submitGradebook, 
   getTeacherSubjects,
-  getTeacherDashboardStats
+  getTeacherDashboardStats,
+  getStudentReport
 } from "../controllers/teacher.controller.js";
 import { 
    logHandwritingReview, 
@@ -53,17 +54,17 @@ router.get("/classes/:classId/:subject", auth, teacherCheck, getClassDetail);
 router.put("/classes/:classId/:subject/status", auth, teacherCheck, updateClassStatus);
 
 /* =====================================================
-   SHARED DATA (DIRECTORY & GRADEBOOK)
+   STUDENT DATA
 ===================================================== */
-// ✅ FIXED: Points to getDirectory. Handles both cases:
-// 1. Directory Screen -> calls /students (Returns All)
-// 2. Gradebook Screen -> calls /students?className=9-A (Returns 9-A only)
+
 router.get("/students", auth, teacherCheck, getDirectory); 
+router.get("/student/:studentId/report", auth, teacherCheck, getStudentReport);
 
-// For Gradebook Subject Dropdown
+/* =====================================================
+   SHARED DATA 
+===================================================== */
+
 router.get("/my-subjects", auth, teacherCheck, getTeacherSubjects); 
-
-// Gradebook Submit
 router.post("/gradebook/submit", auth, teacherCheck, submitGradebook);
 
 /* =====================================================
