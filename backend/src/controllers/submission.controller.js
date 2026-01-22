@@ -147,3 +147,74 @@ export const deleteHandwritingReview = async (req, res) => {
     res.status(500).json({ message: "Failed to delete submission" });
   }
 };
+
+export const getAudioQueue = async (req,res) => {
+  try {
+    const teacherId = req.user.id;
+
+    const myAssignments = await Assignment.find({ teacher: teacherId }).select('_id title');
+    const myAssignmentIds = myAssignments.map(a => a._id);
+
+    const submissions = await Submission.find({
+      type: 'audio', 
+      status: 'submitted', // submitted = pending review
+      assignment: { $in: myAssignmentIds }
+    })
+    .populate('student', 'name rollNo profilePic') 
+    .populate('assignment', 'title') 
+    .sort({ submittedAt: 1 }); 
+
+    const queue = submissions.map(sub => {
+      if (!sub.student || !sub.assignment) return null;
+
+      return {
+        id: sub.student._id,
+        submissionId: sub._id,
+        name: sub.student.name,
+        initials: sub.student.name.substring(0, 2).toUpperCase(),
+        rollNo: sub.student.rollNo,
+        title: sub.assignment.title,
+        fileUrl: sub.fileUrl,
+        submittedAt: sub.submittedAt,
+        
+        // UI Helpers
+        avatarColor: '#e0e7ff',
+        textColor: '#4f46e5',
+        status: 'pending'
+      };
+    }).filter(Boolean);
+
+    res.json(queue);
+
+  } catch (error) {
+    console.error("Audio Queue Error:", error);
+    res.status(500).json({ message: "Failed to fetch audio queue" });
+  }
+};
+
+export const logAudioReview = async (req, res) => {
+  try {
+    const teacherId = req.user.id;
+    const { submissionId, rating, tags, feedback } = req.body;
+
+    const submission = await Submission.findById(submissionId);
+    
+    if (!submission) {
+      return res.status(404).json({ message: "Submission not found" });
+    }
+
+    submission.obtainedMarks = Number(rating); 
+    submission.tags = tags || []; 
+    submission.feedback = feedback || "";
+    submission.teacher = teacherId; 
+    submission.status = 'Graded'; 
+    
+    await submission.save();
+
+    res.status(200).json({ message: "Audio graded successfully", submission });
+
+  } catch (error) {
+    console.error("Log Audio Error:", error);
+    res.status(500).json({ message: "Failed to grade audio" });
+  }
+};

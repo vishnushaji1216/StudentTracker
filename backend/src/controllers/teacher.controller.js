@@ -3,14 +3,14 @@ import Student from "../models/student.model.js";
 import Syllabus from "../models/syllabus.model.js";
 import Assignment from "../models/assignment.model.js";
 import Announcement from "../models/announcement.model.js";
-import Submission from"../models/submission.model.js";
+import Submission from "../models/submission.model.js"; 
 import Quiz from "../models/quiz.model.js";
+import sharp from "sharp";
 
 // --- 1. GET TEACHER'S CLASSES & PROFILE ---
 export const getTeacherProfile = async (req, res) => {
   try {
-    // Assuming req.user.id is set by your auth middleware
-    const teacher = await Teacher.findById(req.user.id).select('name teacherCode'); 
+    const teacher = await Teacher.findById(req.user.id).select('name teacherCode classTeachership');
     
     if (!teacher) {
       return res.status(404).json({ message: "Teacher not found" });
@@ -33,44 +33,79 @@ export const getMyClasses = async (req, res) => {
     // 2. Identify Classes
     const primaryClass = teacher.classTeachership; 
     const assignedClasses = teacher.assignments; 
+    
+    // Get unique list of classes for student counting
     const subjectClassNames = assignedClasses.map(a => a.class);
     const allClassNames = [...new Set([primaryClass, ...subjectClassNames].filter(Boolean))];
 
-    // 3. Stats Aggregation (Same as before)
-    const studentStats = await Student.aggregate([
+    // 3. Aggregate Student Counts (Keep this generic per class)
+    const classCounts = await Student.aggregate([
       { $match: { className: { $in: allClassNames } } },
-      { $group: { _id: "$className", count: { $sum: 1 }, avgScore: { $avg: "$stats.avgScore" } } }
+      { $group: { _id: "$className", count: { $sum: 1 } } }
     ]);
 
-    const getStats = (className) => {
-      const stat = studentStats.find(s => s._id === className);
-      return { count: stat ? stat.count : 0, avg: stat && stat.avgScore ? Math.round(stat.avgScore) + "%" : "0%" };
+    const getStudentCount = (className) => {
+      const stat = classCounts.find(s => s._id === className);
+      return stat ? stat.count : 0;
     };
 
-    // 4. Build Class Cards
+    // 4. Build Class Cards (With Subject-Specific Avg)
     const classesData = await Promise.all(assignedClasses.map(async (assign) => {
+      // A. Syllabus Status
       const syllabusDoc = await Syllabus.findOne({ teacher: teacherId, className: assign.class, subject: assign.subject });
       const currentChapter = syllabusDoc?.chapters.find(ch => ch.isCurrent);
+
+      // B. CALCULATE SUBJECT-SPECIFIC AVERAGE (NEW LOGIC)
+      // Find assignments for THIS class, THIS subject, by THIS teacher
+      const assignments = await Assignment.find({ 
+        teacher: teacherId,
+        className: assign.class,
+        subject: assign.subject,
+        status: { $in: ['Active', 'Completed'] } 
+      }).select('_id totalMarks');
+
+      const assignmentIds = assignments.map(a => a._id);
+
+      // Find graded submissions for these assignments
+      const submissions = await Submission.find({
+        assignment: { $in: assignmentIds },
+        status: 'Graded'
+      }).select('obtainedMarks totalMarks assignment');
+
+      let totalObtained = 0;
+      let totalPossible = 0;
+
+      submissions.forEach(sub => {
+        totalObtained += sub.obtainedMarks;
+        // Use snapshot totalMarks from submission if available, otherwise fallback to assignment
+        const parentAssign = assignments.find(a => a._id.toString() === sub.assignment.toString());
+        const maxMarks = sub.totalMarks || parentAssign?.totalMarks || 100;
+        
+        totalPossible += maxMarks;
+      });
+
+      // Calculate weighted average
+      const subjectAvg = totalPossible > 0 
+        ? Math.round((totalObtained / totalPossible) * 100) 
+        : 0;
 
       return {
         id: assign.class,
         name: `Class ${assign.class}`,
         subject: assign.subject,
         isClassTeacher: (assign.class === primaryClass),
-        students: getStats(assign.class).count,
-        avg: getStats(assign.class).avg,
+        students: getStudentCount(assign.class),
+        avg: subjectAvg + "%", // <--- Returns subject-specific average
         topic: currentChapter ? `Ch ${currentChapter.chapterNo}: ${currentChapter.title}` : "No Active Topic",
         notesStatus: currentChapter ? currentChapter.notesStatus : "Pending",
         quizStatus: currentChapter ? currentChapter.quizStatus : "Pending",
       };
     }));
 
-    // 5. Total Students
-    const totalStudents = studentStats.reduce((acc, curr) => acc + curr.count, 0);
+    const totalStudents = classCounts.reduce((acc, curr) => acc + curr.count, 0);
 
     // --- SEND RESPONSE ---
     res.status(200).json({
-      // ADDED: Profile Data for DailyTaskScreen
       profile: {
         name: teacher.name,
         teacherCode: teacher.teacherCode,
@@ -89,7 +124,63 @@ export const getMyClasses = async (req, res) => {
   }
 };
 
-// --- 2. CREATE A NEW TASK (ASSIGNMENT) ---
+// --- 2. GET STUDENT DIRECTORY (UNIFIED) ---
+export const getDirectory = async (req, res) => {
+  try {
+    const teacherId = req.user.id;
+    const { className } = req.query; // Check if filtering is requested
+
+    const teacher = await Teacher.findById(teacherId);
+    if (!teacher) return res.status(404).json({ message: "Teacher not found!" });
+
+    // Get all valid classes for this teacher
+    const primaryClass = teacher.classTeachership;
+    const assignedClasses = teacher.assignments ? teacher.assignments.map(a => a.class) : [];
+    const allClassNames = [...new Set([primaryClass, ...assignedClasses].filter(Boolean))];
+
+    let filterClasses = allClassNames;
+
+    // IF specific class is requested (e.g. for Gradebook)
+    if (className) {
+        if (allClassNames.includes(className)) {
+            filterClasses = [className];
+        } else {
+            return res.status(403).json({ message: "Unauthorized for this class" });
+        }
+    }
+
+    // Fetch students belonging to the target class(es)
+    const students = await Student.find({ className: { $in: filterClasses } })
+      .select('-password')
+      .sort({ className: 1, rollNo: 1 });
+    
+    res.status(200).json(students);
+  } catch (error) {
+    console.error("Directory error: ", error);
+    res.status(500).json({ message: "Failed to fetch student directory" });
+  }
+};
+
+// --- 3. GET TEACHER SUBJECTS (For Dropdown) ---
+export const getTeacherSubjects = async (req, res) => {
+  try {
+    const { className } = req.query;
+    const teacherId = req.user.id;
+    
+    const teacher = await Teacher.findById(teacherId);
+    
+    const subjects = teacher.assignments
+      .filter(a => a.class === className)
+      .map(a => a.subject);
+      
+    const uniqueSubjects = [...new Set(subjects)];
+    res.json(uniqueSubjects);
+  } catch (error) {
+    res.status(500).json({ message: "Failed to fetch subjects" });
+  }
+};
+
+// --- 4. CREATE ASSIGNMENT/EXAM ---
 export const createAssignment = async (req, res) => {
   try {
     const { className, subject, title, description, type, dueDate, totalMarks, targetType, rollStart, rollEnd } = req.body;
@@ -126,7 +217,159 @@ export const createAssignment = async (req, res) => {
   }
 };
 
-// --- 3. GET ASSIGNMENTS HISTORY ---
+// --- 5. GRADEBOOK SUBMIT ---
+export const submitGradebook = async (req, res) => {
+  try {
+    const { className, subject, examTitle, totalMarks, studentMarks } = req.body;
+
+    // 1. Create a "Ghost" Assignment container
+    const examEntry = await Assignment.create({
+      teacher: req.user.id,
+      title: examTitle,
+      subject: subject,
+      className: className,
+      type: 'exam', 
+      totalMarks: Number(totalMarks),
+      status: 'Completed', 
+      dueDate: new Date()
+    });
+
+    // 2. Prepare Bulk Submissions
+    const submissions = studentMarks.map(item => ({
+      student: item.studentId,
+      teacher: req.user.id,
+      assignment: examEntry._id,
+      type: 'exam',
+      status: 'Graded',
+      obtainedMarks: item.marks,
+      totalMarks: Number(totalMarks),
+      submittedAt: new Date()
+    }));
+
+    // 3. Bulk Insert
+    await Submission.insertMany(submissions);
+
+    res.status(201).json({ message: "Grades published successfully" });
+
+  } catch (error) {
+    console.error("Gradebook Error:", error);
+    res.status(500).json({ message: "Failed to publish grades" });
+  }
+};
+
+// --- 6. DASHBOARD STATS ---
+export const getTeacherDashboardStats = async (req, res) => {
+  try {
+    const teacherId = req.user.id;
+    const teacher = await Teacher.findById(teacherId);
+    
+    // Default to primary class, or handle empty state if not set
+    const className = teacher.classTeachership || (teacher.assignments[0] ? teacher.assignments[0].class : null);
+
+    if (!className) {
+      return res.status(200).json({
+          className: "N/A",
+          classPerformance: { currentAvg: 0, trend: 0, history: [] },
+          pendingTasks: { audio: 0, handwriting: 0, total: 0 }
+      });
+    }
+
+    const assignments = await Assignment.find({
+      className: className,
+      type: { $in: ['exam', 'quiz'] },
+      status: { $in: ['Completed', 'Active'] }
+    }).select('title type createdAt totalMarks');
+
+    const quizzes = await Quiz.find({ teacher: teacherId }).select('title totalMarks createdAt');
+
+    let allEvents = [
+      ...assignments.map(a => ({ ...a.toObject(), category: 'assignment' })), 
+      ...quizzes.map(q => ({ ...q.toObject(), category: 'quiz' }))
+    ];
+
+    allEvents.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+
+    let totalObtainedGlobal = 0;
+    let totalPossibleGlobal = 0;
+    let eventStats = [];
+
+    for (const event of allEvents) {
+      const query = { status: 'Graded' };
+      if (event.category === 'assignment') query.assignment = event._id;
+      else query.quiz = event._id;
+
+      const submissions = await Submission.find(query).select('obtainedMarks totalMarks');
+
+      if (submissions.length > 0) {
+        let eventObtained = 0;
+        let eventTotal = 0;
+
+        submissions.forEach(s => {
+          eventObtained += s.obtainedMarks;
+          eventTotal += (s.totalMarks || event.totalMarks || 100);
+        });
+
+        // Avoid division by zero
+        const eventAvg = eventTotal > 0 ? (eventObtained / eventTotal) * 100 : 0;
+
+        eventStats.push({
+          id: event._id,
+          label: event.title,
+          score: Math.round(eventAvg),
+          date: event.createdAt
+        });
+
+        totalObtainedGlobal += eventObtained;
+        totalPossibleGlobal += eventTotal;
+      }
+    }
+
+    const globalAverage = totalPossibleGlobal > 0 
+        ? Math.round((totalObtainedGlobal / totalPossibleGlobal) * 100) 
+        : 0;
+
+    const graphData = eventStats.slice(-3); // Last 3 events
+
+    let trend = 0;
+    if (eventStats.length >= 2) {
+      const latest = eventStats[eventStats.length - 1].score;
+      const previous = eventStats[eventStats.length - 2].score;
+      trend = latest - previous; 
+    }
+
+    const pendingAudio = await Submission.countDocuments({ 
+      teacher: teacherId, 
+      type: 'audio', 
+      status: 'Submitted' 
+    });
+
+    const pendingHandwriting = await Submission.countDocuments({ 
+      teacher: teacherId, 
+      type: 'handwriting', 
+      status: 'Submitted' 
+    });
+
+    res.json({
+      className,
+      classPerformance: {
+          currentAvg: globalAverage,
+          trend: trend, 
+          history: graphData
+      },
+      pendingTasks: {
+          audio: pendingAudio,
+          handwriting: pendingHandwriting,
+          total: pendingAudio + pendingHandwriting
+      }
+    });
+
+  } catch (error) {
+    console.error("Dashboard Stats Error:", error);
+    res.status(500).json({ message: "Failed to load dashboard stats" });
+  }
+};
+
+// --- 7. OTHER HELPERS ---
 export const getAssignments = async (req, res) => {
   try {
     const teacherId = req.user.id;
@@ -137,153 +380,80 @@ export const getAssignments = async (req, res) => {
   }
 };
 
-// --- 4. DELETE ASSIGNMENT ---
 export const deleteAssignment = async (req, res) => {
   try {
     const { id } = req.params;
     const assignment = await Assignment.findById(id);
-
-    if (!assignment) {
-      return res.status(404).json({ message: "Assignment not found" });
-    }
-
-    if (assignment.teacher.toString() !== req.user.id) {
-      return res.status(403).json({ message: "Not authorized to delete this task" });
-    }
+    if (!assignment) return res.status(404).json({ message: "Assignment not found" });
+    if (assignment.teacher.toString() !== req.user.id) return res.status(403).json({ message: "Not authorized" });
 
     await assignment.deleteOne();
     res.status(200).json({ message: "Assignment deleted successfully" });
-
   } catch (error) {
-    console.error("Delete Error:", error);
     res.status(500).json({ message: "Failed to delete assignment" });
   }
 };
 
-// --- 5. POST A NOTICE ---
 export const postNotice = async (req, res) => {
   try {
     const { title, message, target, targetClass, isUrgent } = req.body;
     const teacherId = req.user.id;
-    
     const teacher = await Teacher.findById(teacherId);
 
-    if (!title || !message || !target) {
-      return res.status(400).json({ message: "Title, Message, and Target are required" });
-    }
-
     const newAnnouncement = new Announcement({
-      sender: { 
-        role: 'teacher', 
-        id: teacherId.toString(), // <--- FIX 1: Ensure String
-        name: teacher.name 
-      },
+      sender: { role: 'teacher', id: teacherId.toString(), name: teacher.name },
       targetAudience: target, 
-      targetClass: targetClass, 
-      title,
-      message,
+      targetClass, 
+      title, 
+      message, 
       isUrgent: isUrgent || false
     });
 
     await newAnnouncement.save();
-
-    res.status(201).json({ 
-      message: "Notice posted successfully", 
-      notice: newAnnouncement 
-    });
-
+    res.status(201).json({ message: "Notice posted successfully", notice: newAnnouncement });
   } catch (error) {
-    console.error("Post Notice Error:", error);
     res.status(500).json({ message: "Failed to post notice" });
   }
 };
 
-// --- 6. GET NOTICE BOARD ---
 export const getNotices = async (req, res) => {
   try {
     const teacherId = req.user.id;
-
-    // Fetch notices
     const notices = await Announcement.find({
       $or: [
-        { 'sender.id': teacherId.toString() }, // <--- FIX 2: Ensure String for Query
+        { 'sender.id': teacherId.toString() },
         { targetAudience: 'Teachers' },
         { targetAudience: 'Everyone' }
       ]
     }).sort({ createdAt: -1 });
-
     res.status(200).json(notices);
   } catch (error) {
-    console.error("Get Notices Error:", error);
     res.status(500).json({ message: "Failed to fetch notices" });
   }
 };
 
-// --- 7. DELETE NOTICE ---
 export const deleteNotice = async (req, res) => {
   try {
     const { id } = req.params;
     const notice = await Announcement.findById(id);
-
-    if (!notice) {
-      return res.status(404).json({ message: "Notice not found" });
-    }
-
-    // Security: Only the teacher who sent it can delete it
-    // Admin notices cannot be deleted by teachers
-    if (notice.sender.id !== req.user.id) {
-      return res.status(403).json({ message: "Not authorized to delete this notice" });
-    }
+    if (!notice) return res.status(404).json({ message: "Notice not found" });
+    if (notice.sender.id !== req.user.id) return res.status(403).json({ message: "Not authorized" });
 
     await notice.deleteOne();
     res.status(200).json({ message: "Notice deleted successfully" });
   } catch (error) {
-    console.error("Delete Notice Error:", error);
     res.status(500).json({ message: "Failed to delete notice" });
   }
 };
 
-// --- 8. GET STUDENT DIRECTORY ---
-export const getDirectory = async (req, res) => {
-  try {
-    const teacherId = req.user.id;
-    const teacher = await Teacher.findById(teacherId);
-
-    if (!teacher) return res.status(404).json({ message: "Teacher not found!" });
-
-    const primaryClass = teacher.classTeachership;
-    // Ensure assignments exists to prevent crash if undefined
-    const assignedClasses = teacher.assignments ? teacher.assignments.map(a => a.class) : [];
-
-    const allClassNames = [...new Set([primaryClass, ...assignedClasses].filter(Boolean))];
-
-    // FIX: Changed 'classname' to 'className' to match your Model
-    const students = await Student.find({ className: { $in: allClassNames } })
-      .select('-password')
-      .sort({ className: 1, rollNo: 1 });
-    
-    res.status(200).json(students);
-  } catch (error) {
-    console.error("Directory error: ", error);
-    res.status(500).json({ message: "Failed to fetch student directory" });
-  }
-};
-
-// --- 9. GET CLASS DETAILS (Roster + Active Topic) ---
 export const getClassDetail = async (req, res) => {
   try {
-    const { classId, subject } = req.params; // We need both to find the right syllabus
+    const { classId, subject } = req.params;
     const teacherId = req.user.id;
 
-    // A. Fetch Student Roster for this specific class
-    const students = await Student.find({ className: classId })
-      .select('name rollNo stats')
-      .sort({ rollNo: 1 });
-
-    // B. Fetch Syllabus to get "Current Topic" status
+    const students = await Student.find({ className: classId }).select('name rollNo stats').sort({ rollNo: 1 });
     let syllabus = await Syllabus.findOne({ teacher: teacherId, className: classId, subject });
     
-    // If no syllabus exists, return a default/empty structure
     let currentChapter = {
       title: "No Active Topic",
       chapterNo: 0,
@@ -297,72 +467,52 @@ export const getClassDetail = async (req, res) => {
       if (active) currentChapter = active;
     }
 
-    res.status(200).json({
-      roster: students,
-      topic: currentChapter
-    });
-
+    res.status(200).json({ roster: students, topic: currentChapter });
   } catch (error) {
-    console.error("Class Detail Error:", error);
     res.status(500).json({ message: "Failed to load class details" });
   }
 };
 
-// --- 10. UPDATE CLASS STATUS (Toggles) ---
 export const updateClassStatus = async (req, res) => {
   try {
     const { classId, subject } = req.params;
-    // Added 'chapterNo' to the destructured body
     const { chapterNo, chapterTitle, notesStatus, quizStatus, isCompleted } = req.body;
     const teacherId = req.user.id;
 
     const syllabus = await Syllabus.findOne({ teacher: teacherId, className: classId, subject });
-
-    if (!syllabus) {
-      return res.status(404).json({ message: "Syllabus not found" });
-    }
+    if (!syllabus) return res.status(404).json({ message: "Syllabus not found" });
 
     const activeIndex = syllabus.chapters.findIndex(c => c.isCurrent);
+    if (activeIndex === -1) return res.status(404).json({ message: "No active chapter" });
 
-    if (activeIndex === -1) {
-       return res.status(404).json({ message: "No active chapter selected" });
-    }
-
-    // --- UPDATE LOGIC ---
-    if (chapterNo) syllabus.chapters[activeIndex].chapterNo = Number(chapterNo); // <--- NEW
+    if (chapterNo) syllabus.chapters[activeIndex].chapterNo = Number(chapterNo);
     if (chapterTitle) syllabus.chapters[activeIndex].title = chapterTitle;
-    
     syllabus.chapters[activeIndex].notesStatus = notesStatus ? 'Done' : 'Pending';
     syllabus.chapters[activeIndex].quizStatus = quizStatus ? 'Done' : 'Pending';
     syllabus.chapters[activeIndex].isCompleted = isCompleted;
 
     await syllabus.save();
-
     res.status(200).json({ message: "Status updated", chapter: syllabus.chapters[activeIndex] });
-
   } catch (error) {
-    console.error("Update Status Error:", error);
     res.status(500).json({ message: "Failed to update status" });
   }
 };
 
-export const getQuizDashboard = async (req,res) => {
+// --- QUIZ FUNCTIONS ---
+export const getQuizDashboard = async (req, res) => {
   try {
     const teacherId = req.user.id;
-
     const quizzes = await Assignment.find({ teacher: teacherId, type: 'quiz'})
-    .populate('quizId', 'totalMarks questions')
-    .sort({ createdAt: -1});
+      .populate('quizId', 'totalMarks questions')
+      .sort({ createdAt: -1});
 
     const dashboardData = await Promise.all(quizzes.map(async(q) => {
       const submittedCount = await Submission.countDocuments({ assignment: q._id });
-
       let computedStatus = q.status;
       const now = new Date();
 
       if (q.status === 'Active' && q.dueDate && now > q.dueDate) {
           computedStatus = 'Completed';
-
           if(q.status !== 'Completed'){
             q.status = 'Completed';
             await q.save();
@@ -383,41 +533,19 @@ export const getQuizDashboard = async (req,res) => {
     }));
 
     res.status(200).json(dashboardData);
-
   } catch (error) {
-    console.error("Quiz Dashboard Error: ",error)
     res.status(500).json({ message:"Failed to load quiz dashboard"});
   }
 };
 
 export const createQuiz = async (req, res) => {
   try {
-    const {
-      title,
-      className,
-      subject,
-      releaseType,
-      scheduleDate,
-      scheduleTime,
-      duration,
-      passingScore,
-      questions
-    } = req.body;
-
+    const { title, className, subject, releaseType, scheduleDate, scheduleTime, duration, passingScore, questions, isDraft } = req.body;
     const teacherId = req.user.id;
 
-    // A. VALIDATION
-    if (!questions || questions.length === 0) {
-      return res.status(400).json({
-        message: "Quiz must have at least one question."
-      });
-    }
+    if (!questions || questions.length === 0) return res.status(400).json({ message: "Quiz must have at least one question." });
 
-    // B. CREATE CONTENT
-    const calculatedTotal = questions.reduce(
-      (sum, q) => sum + (Number(q.marks) || 1),
-      0
-    );
+    const calculatedTotal = questions.reduce((sum, q) => sum + (Number(q.marks) || 1), 0);
 
     const newQuiz = new Quiz({
       teacher: teacherId,
@@ -428,20 +556,15 @@ export const createQuiz = async (req, res) => {
 
     const savedQuiz = await newQuiz.save();
 
-    // C. CALCULATE TIMINGS
     let startAt = new Date();
-
     if (releaseType === "Later" && scheduleDate && scheduleTime) {
       const parsedDate = new Date(`${scheduleDate}T${scheduleTime}:00`);
-      if (!isNaN(parsedDate.getTime())) {
-        startAt = parsedDate;
-      }
+      if (!isNaN(parsedDate.getTime())) startAt = parsedDate;
     }
 
     const safeDuration = Number(duration) || 10;
     const endAt = new Date(startAt.getTime() + safeDuration * 60000);
 
-    // D. CREATE EVENT
     const newAssignment = new Assignment({
       teacher: teacherId,
       quizId: savedQuiz._id,
@@ -449,7 +572,7 @@ export const createQuiz = async (req, res) => {
       subject: subject || "General",
       title,
       type: "quiz",
-      status: req.body.isDraft? 'Draft' : (releaseType === "Now" ? "Active" : "Scheduled"),
+      status: isDraft ? 'Draft' : (releaseType === "Now" ? "Active" : "Scheduled"),
       scheduledAt: startAt,
       dueDate: endAt,
       duration: safeDuration,
@@ -459,140 +582,150 @@ export const createQuiz = async (req, res) => {
 
     await newAssignment.save();
 
-    res.status(201).json({
-      message: "Quiz created successfully",
-      quizId: newAssignment._id,
-      status: newAssignment.status
-    });
+    res.status(201).json({ message: "Quiz created successfully", quizId: newAssignment._id, status: newAssignment.status });
   } catch (error) {
-    console.error("Create Quiz Error:", error);
-    res.status(500).json({
-      message: "Failed to create quiz"
-    });
+    res.status(500).json({ message: "Failed to create quiz" });
   }
 };
 
-export const getQuizDetail = async (req,res) => {
+export const getQuizDetail = async (req, res) => {
   try {
     const { id } = req.params;
-
     const assignment = await Assignment.findById(id).populate('quizId');
     if (!assignment) return res.status(404).json({ message: "Quiz not found!"});
 
     const submission = await Submission.find({ assignment: id })
-    .populate('student', 'name rollNo')
-    .sort({ obtainedMarks: -1 });
+      .populate('student', 'name rollNo')
+      .sort({ obtainedMarks: -1 });
 
     res.json({
       ...assignment.toObject(),
       questions: assignment.quizId ? assignment.quizId.questions : [],
       submissions: submission
     });
-
   } catch (error) {
-    console.error("Get Detail Error: ", error)
     res.status(500).json({ message: "Server error" });
   }
 };
 
-export const updateQuiz = async (req,res) => {
+export const updateQuiz = async (req, res) => {
   try {
     const { id } = req.params;
     const { title, duration, passingScore, questions, status } = req.body;
 
     const assignment = await Assignment.findByIdAndUpdate(id, {
-      title, 
-      duration,
-      passingScore,
-      questions,
-      status,
+      title, duration, passingScore, questions, status,
     }, { new:true});
 
     if (assignment.quizId && questions) {
       const newTotal = questions.reduce((sum, q) => sum + (Number(q.marks) || 1), 0);
-
       await Quiz.findByIdAndUpdate(assignment.quizId, {
         questions: questions,
         totalMarks: newTotal
       });
-
       assignment.totalMarks = newTotal;
       await assignment.save();
     }
 
-    res.json({ message: "updated Successfully", assignment });
-
+    res.json({ message: "Updated Successfully", assignment });
   } catch (error) {
-    console.error("Update Error: ", error)
-    res.status(500).json({ message: "update failed"});
-  }
-}
-
-export const submitGradebook = async (req,res) => {
-  try {
-    const { className, subject, examTitle, totalMarks, studentMarks } = req.body;
-
-    const examEntry = await Assignment.create({
-      teacher: req.user.id, 
-      title: examTitle,
-      subject: subject,
-      className: className,
-      type: 'exam', 
-      totalMarks: Number(totalMarks),
-      status: 'Completed', 
-      dueDate: new Date()
-    });
-
-    const submissions = studentMarks.map(item => ({
-      student: item.studentId,
-      teacher: req.user.id,
-      assignment: examEntry._id,
-      type: 'exam', // Lowercase
-      status: 'Graded',
-      obtainedMarks: item.marks,
-      totalMarks: Number(totalMarks),
-      submittedAt: new Date()
-    }));
-
-    await Submission.insertMany(submissions);
-
-    res.status(201).json({ message: "Grades published successfully" });
-
-  } catch (error) {
-    console.error("Gradebook Error:", error);
-    res.status(500).json({ message: "Failed to publish grades" });
-  }
-}
-
-export const getTeacherStudents = async (req, res) => {
-  try {
-    const { className } = req.query;
-    // Fetch students belonging to this class
-    const students = await Student.find({ className }).select("name rollNo _id");
-    res.json(students);
-  } catch (error) {
-    res.status(500).json({ message: "Failed to fetch students" });
+    res.status(500).json({ message: "Update failed"});
   }
 };
 
-export const getTeacherSubjects = async (req, res) => {
+export const getStudentReport = async (req, res) => {
   try {
-    const { className } = req.query;
+    const { studentId } = req.params;
     const teacherId = req.user.id;
-    
-    // Find teacher and look at their assignments/classes
+
+    const student = await Student.findById(studentId);
+    if (!student) return res.status(404).json({ message: "Student not found" });
+
     const teacher = await Teacher.findById(teacherId);
-    
-    // Filter assignments where class matches
-    const subjects = teacher.assignments
-      .filter(a => a.class === className)
-      .map(a => a.subject);
+
+    const isClassTeacher = teacher.classTeachership === student.className;
+
+    const allSyllabus = await Syllabus.find({ className: student.className }).populate('teacher', 'name');
+
+    const visibleSubjects = isClassTeacher 
+      ? allSyllabus 
+      : allSyllabus.filter(s => s.teacher._id.toString() === teacherId);
+
+    if (visibleSubjects.length === 0) {
+      return res.status(200).json({ 
+        student, 
+        subjects: [] 
+      });
+    }
+
+    const reportCards = await Promise.all(visibleSubjects.map(async (doc) => {
+
+      const homeworks = await Assignment.find({ 
+        className: student.className, 
+        subject: doc.subject, 
+        type: 'homework',
+        status: { $ne: 'Draft' } 
+      }).select('_id');
       
-    // Remove duplicates
-    const uniqueSubjects = [...new Set(subjects)];
-    
-    res.json(uniqueSubjects);
+      const homeworkIds = homeworks.map(h => h._id);
+
+      const pendingCheck = await Submission.countDocuments({
+        student: studentId,
+        assignment: { $in: homeworkIds },
+        status: 'Submitted' 
+      });
+
+      const notebookStatus = pendingCheck === 0 ? "Checked" : "Pending";
+
+      const examAssignments = await Assignment.find({ 
+        className: student.className, 
+        subject: doc.subject, 
+        type: 'exam' 
+      }).select('_id title totalMarks');
+      
+      const examIds = examAssignments.map(e => e._id);
+
+      const latestSubmission = await Submission.findOne({
+        student: studentId,
+        assignment: { $in: examIds },
+        status: 'Graded'
+      })
+      .sort({ submittedAt: -1 })
+      .populate('assignment', 'title totalMarks');
+
+      return {
+        id: doc.subject.toLowerCase(),
+        name: doc.subject,
+        teacher: doc.teacher?.name || "Unknown",
+        initials: doc.subject.substring(0, 2).toUpperCase(),
+        
+        notebook: notebookStatus,
+        
+        examName: latestSubmission ? latestSubmission.assignment.title : "No Exams",
+        examScore: latestSubmission ? latestSubmission.obtainedMarks : null,
+        examTotal: latestSubmission ? latestSubmission.totalMarks : null,
+        isExamDone: !!latestSubmission,
+        
+        chapter: doc.chapters.find(c => c.isCurrent)?.title || "No Active Chapter",
+        color: notebookStatus === 'Checked' ? '#16a34a' : '#f97316' 
+      };
+    }));
+
+    res.status(200).json({
+      student: {
+        id: student._id,
+        name: student.name,
+        rollNo: student.rollNo,
+        className: student.className,
+        mobile: student.mobile,
+        avatar: "https://ui-avatars.com/api/?name=" + student.name + "&background=eef2ff&color=4f46e5"
+      },
+      isClassTeacher,
+      subjects: reportCards
+    });
+
   } catch (error) {
-    res.status(500).json({ message: "Failed to fetch subjects" });
+    console.error("Student Report Error:", error);
+    res.status(500).json({ message: "Failed to generate student report" });
   }
 };

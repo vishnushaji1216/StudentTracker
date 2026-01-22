@@ -324,14 +324,14 @@ export default function DailyTaskScreen({ navigation }) {
               <Text style={styles.headerTitle}>Daily Planner</Text>
             </View>
           </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingRight: 20 }}>
+          {/* <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingRight: 20 }}>
             {dateList.map((date) => (
                 <TouchableOpacity key={date.id} style={[styles.dateItem, date.active && styles.dateItemActive]}>
                     <Text style={[styles.dateDay, date.active && styles.textWhite]}>{date.day}</Text>
                     <Text style={[styles.dateNum, date.active && styles.textWhite]}>{date.num}</Text>
                 </TouchableOpacity>
             ))}
-          </ScrollView>
+          </ScrollView> */}
         </View>
 
         <View style={styles.contentContainer}>
