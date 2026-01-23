@@ -92,21 +92,25 @@ export default function NoticeBoardScreen({ navigation }) {
   const fetchProfileAndClasses = async () => {
     try {
       const response = await api.get('/teacher/classes');
+      
+      // FIXED: Access data from response.data.profile and response.data.classes
+      const profileData = response.data.profile;
+      const classesData = response.data.classes;
+
       setProfile({
-        name: response.data.name || "Teacher",
-        code: response.data.teacherCode || "T-XXXX",
-        mainClass: response.data.classTeachership || "N/A"
+        name: profileData?.name || "Teacher",
+        code: profileData?.teacherCode || "T-XXXX",
+        mainClass: profileData?.classTeachership || "N/A"
       });
 
-      const classList = [];
-      if (response.data.classTeachership) classList.push(response.data.classTeachership);
-      if (response.data.assignedClasses) {
-        response.data.assignedClasses.forEach(c => {
-          if (!classList.includes(c.class)) classList.push(c.class);
-        });
-      }
-      setMyClasses(classList);
-      if (classList.length > 0) setTargetClass(classList[0]);
+      // Extract unique class IDs from the classes array
+      const classList = classesData.map(c => c.id);
+      
+      // Remove duplicates just in case
+      const uniqueClasses = [...new Set(classList)];
+      
+      setMyClasses(uniqueClasses);
+      if (uniqueClasses.length > 0) setTargetClass(uniqueClasses[0]);
 
     } catch (error) {
       console.error("Fetch Profile Error:", error);

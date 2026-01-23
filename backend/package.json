@@ -11,18 +11,26 @@
   "license": "ISC",
   "type": "module",
   "dependencies": {
+    "@adminjs/express": "^6.1.1",
+    "@adminjs/mongoose": "^4.1.0",
     "@supabase/supabase-js": "^2.90.1",
+    "adminjs": "^7.8.17",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",
     "csv-parser": "^3.2.0",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
+    "express-session": "^1.19.0",
     "json2csv": "^6.0.0-alpha.2",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.20.1",
     "multer": "^2.0.2",
     "nodemon": "^3.1.11",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
     "react-native-vision-camera": "^4.7.3",
-    "sharp": "^0.34.5"
+    "recharts": "^3.7.0",
+    "sharp": "^0.34.5",
+    "styled-components": "^6.3.8"
   }
 }
