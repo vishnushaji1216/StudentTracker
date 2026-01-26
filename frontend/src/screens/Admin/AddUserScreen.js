@@ -12,20 +12,16 @@ import {
   BackHandler,
   Dimensions,
   KeyboardAvoidingView,
-  Alert // Added Alert for feedback
+  Alert
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import FontAwesome5 from "react-native-vector-icons/FontAwesome5";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import api from "../../services/api"; // Integrated API service
+import api from "../../services/api";
 
 const { width } = Dimensions.get('window');
 const SIDEBAR_WIDTH = 280;
 
-/**
- * AddUserScreen Component
- * Updated to handle auto-generated passwords and API integration.
- */
 export default function AddUserScreen({ navigation }) {
   const [activeRole, setActiveRole] = useState("teacher"); 
 
@@ -38,7 +34,6 @@ export default function AddUserScreen({ navigation }) {
   const [teacherName, setTeacherName] = useState("");
   const [teacherMobile, setTeacherMobile] = useState("");
   const [teacherClassTeachership, setTeacherClassTeachership] = useState("");
-  // teacherPassword state removed as it's now backend-generated
   
   // Teaching Assignment Logic
   const [tempClass, setTempClass] = useState("");
@@ -50,9 +45,8 @@ export default function AddUserScreen({ navigation }) {
   const [parentMobile, setParentMobile] = useState("");
   const [studentClass, setStudentClass] = useState("");
   const [studentRoll, setStudentRoll] = useState("");
-  // studentPassword state removed as it's now backend-generated
 
-  // Handle Android Back Button to close sidebar first
+  // Handle Android Back Button
   useEffect(() => {
     const backHandler = BackHandler.addEventListener(
       "hardwareBackPress",
@@ -188,20 +182,21 @@ export default function AddUserScreen({ navigation }) {
               </View>
             </View>
 
+            {/* Sidebar Menu */}
             <View style={styles.menuSection}>
-              <SidebarItem icon="chart-pie" label="Dashboard" onPress={() => { toggleSidebar(); navigation?.navigate('AdminDash'); }} />
+              <SidebarItem icon="chart-pie" label="Dashboard" onPress={() => { toggleSidebar(); navigation.navigate('AdminDash');}} />
               <SidebarItem icon="user-plus" label="Add User" active />
-              <SidebarItem icon="list-ul" label="Teacher Registry" onPress={() => { toggleSidebar(); navigation?.navigate('TeacherRegistry'); }} />
-              <SidebarItem icon="list-ul" label="Student Registry" onPress={() => { toggleSidebar(); navigation?.navigate('StudentRegistry'); }} />
-              <SidebarItem icon="bullhorn" label="Broadcast" onPress={() => { toggleSidebar(); navigation?.navigate('Broadcast'); }}/>
-              <SidebarItem icon="graduation-cap" label="Promotion Tool" onPress={() => {toggleSidebar(); navigation.navigate('PromotionTool');}}/>
-              <SidebarItem icon="shield-alt" label="Settings" onPress={() => {toggleSidebar();navigation.navigate('AdminSetting');}}/>
+              <SidebarItem icon="list-ul" label="Teacher Registry" onPress={() => {toggleSidebar(); navigation.navigate('TeacherRegistry');}}/>
+              <SidebarItem icon="list-ul" label="Student Registry" onPress={() => { toggleSidebar(); navigation.navigate('StudentRegistry');}}/>
+              <SidebarItem icon="bullhorn" label="Broadcast" onPress={() => {toggleSidebar();navigation.navigate('Broadcast');}}/>
+              <SidebarItem icon="graduation-cap" label="Promotion Tool" onPress={() => {toggleSidebar();navigation.navigate('PromotionTool');}}/>
+              <SidebarItem icon="shield-alt" label="Security" onPress={() => {toggleSidebar(); navigation.navigate('AdminSetting');}}/>
             </View>
           </View>
 
           <View style={styles.sidebarFooter}>
             <View style={styles.footerRow}>
-              <TouchableOpacity style={styles.settingsBtn}>
+              <TouchableOpacity style={styles.settingsBtn} onPress={() => {toggleSidebar(); navigation.navigate('AdminSetting');}}>
                 <FontAwesome5 name="cog" size={16} color="#64748b" />
                 <Text style={styles.settingsText}>Settings</Text>
               </TouchableOpacity>
@@ -428,11 +423,6 @@ export default function AddUserScreen({ navigation }) {
                   <TouchableOpacity style={styles.primaryBtn} onPress={handleOnboard}>
                     <Text style={styles.primaryBtnText}>Add Student</Text>
                   </TouchableOpacity>
-
-                  {/* <TouchableOpacity style={styles.bulkLink}>
-                    <FontAwesome5 name="layer-group" size={12} color="#4f46e5" />
-                    <Text style={styles.bulkLinkText}>Bulk Upload Students?</Text>
-                  </TouchableOpacity> */}
                 </View>
               )}
 
@@ -532,8 +522,6 @@ const styles = StyleSheet.create({
   credentialValue: { fontSize: 12, fontWeight: 'bold', color: '#1e293b' },
   primaryBtn: { backgroundColor: '#4f46e5', paddingVertical: 16, borderRadius: 12, alignItems: 'center', elevation: 4, marginTop: 8 },
   primaryBtnText: { color: '#fff', fontSize: 14, fontWeight: 'bold' },
-  bulkLink: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, padding: 16, marginTop: 8 },
-  bulkLinkText: { color: '#4f46e5', fontSize: 12, fontWeight: 'bold' },
   bottomNav: { flexDirection: 'row', backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#e2e8f0', paddingVertical: 10, paddingBottom: Platform.OS === 'ios' ? 25 : 10, justifyContent: 'space-around', alignItems: 'center', elevation: 10 },
   navItem: { alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20 },
   navLabel: { fontSize: 10, fontWeight: '600', color: '#94a3b8', marginTop: 4 },

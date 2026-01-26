@@ -1,102 +1,95 @@
-import React, { useRef, useState, useEffect } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   View,
   Text,
   TouchableOpacity,
-  Animated,
   StyleSheet,
   ScrollView,
+  StatusBar,
+  Animated,
   BackHandler,
   Platform,
-  StatusBar
+  TextInput,
+  Dimensions
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import FontAwesome5 from "react-native-vector-icons/FontAwesome5";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-const SIDEBAR_WIDTH = 280; // Matches standard drawer width
+const { width } = Dimensions.get('window');
+const SIDEBAR_WIDTH = 280;
+
+// --- DUMMY DATA CONTRACT (Swap with API later) ---
+const MOCK_DATA = {
+  date: "Monday, 24 Oct",
+  financial: {
+    collectedToday: "42,500",
+    isCritical: false
+  },
+  alerts: {
+    lockedUsers: 12,
+    pendingApprovals: 4
+  }
+};
 
 export default function AdminDashScreen({ navigation }) {
+  // Sidebar State
   const slideAnim = useRef(new Animated.Value(-SIDEBAR_WIDTH)).current;
   const overlayAnim = useRef(new Animated.Value(0)).current;
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
-  // Handle Android back button
+  // Dashboard State
+  const [showFinance, setShowFinance] = useState(false);
+  const [searchText, setSearchText] = useState("");
+
+  // --- NAVIGATION & SIDEBAR LOGIC ---
   useEffect(() => {
-    const backHandler = BackHandler.addEventListener(
-      "hardwareBackPress",
-      () => {
-        if (isSidebarOpen) {
-          toggleSidebar();
-          return true;
-        }
-        return false;
+    const backHandler = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (isSidebarOpen) {
+        toggleSidebar();
+        return true;
       }
-    );
+      return false;
+    });
     return () => backHandler.remove();
   }, [isSidebarOpen]);
 
   const toggleSidebar = () => {
     const isOpen = isSidebarOpen;
-    // Animate Sidebar
-    Animated.timing(slideAnim, {
-      toValue: isOpen ? -SIDEBAR_WIDTH : 0,
-      duration: 300,
-      useNativeDriver: true,
-    }).start();
-
-    // Animate Overlay
-    Animated.timing(overlayAnim, {
-      toValue: isOpen ? 0 : 0.5,
-      duration: 300,
-      useNativeDriver: true,
-    }).start();
-
+    Animated.parallel([
+      Animated.timing(slideAnim, { toValue: isOpen ? -SIDEBAR_WIDTH : 0, duration: 300, useNativeDriver: true }),
+      Animated.timing(overlayAnim, { toValue: isOpen ? 0 : 0.5, duration: 300, useNativeDriver: true }),
+    ]).start();
     setIsSidebarOpen(!isOpen);
   };
 
   const handleLogout = async () => {
-    try {
-      await AsyncStorage.multiRemove(["token", "user", "role"]);
-      navigation.replace("Login", { skipAnimation: true });
-    } catch (error) {
-      console.log("Logout error:", error);
-    }
+    await AsyncStorage.multiRemove(["token", "user", "role"]);
+    navigation.replace("Login");
   };
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#fff" />
-      
-      {/* DARK OVERLAY */}
-      <Animated.View
-        style={[styles.overlay, { opacity: overlayAnim }]}
-        pointerEvents={isSidebarOpen ? "auto" : "none"}
-      >
+
+      {/* --- SIDEBAR OVERLAY --- */}
+      <Animated.View style={[styles.overlay, { opacity: overlayAnim }]} pointerEvents={isSidebarOpen ? "auto" : "none"}>
         <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={toggleSidebar} />
       </Animated.View>
 
-      {/* SIDEBAR DRAWER */}
-      <Animated.View
-        style={[
-          styles.sidebar,
-          { transform: [{ translateX: slideAnim }] },
-        ]}
-      >
+      {/* --- SIDEBAR DRAWER --- */}
+      <Animated.View style={[styles.sidebar, { transform: [{ translateX: slideAnim }] }]}>
         <View style={styles.sidebarContainer}>
           <View>
-            {/* Sidebar Header */}
             <View style={styles.sidebarHeader}>
-              <View style={styles.logoBox}>
-                <Text style={styles.logoText}>S</Text>
-              </View>
+              <View style={styles.logoBox}><Text style={styles.logoText}>S</Text></View>
               <View>
                 <Text style={styles.sidebarTitle}>Stella Admin</Text>
                 <Text style={styles.sidebarVersion}>v5.0.0</Text>
               </View>
             </View>
 
-            {/* Navigation Items */}
+            {/* --- USER PROVIDED SIDEBAR SECTION --- */}
             <View style={styles.menuSection}>
               <SidebarItem icon="chart-pie" label="Dashboard" active />
               <SidebarItem icon="user-plus" label="Add User" onPress={() => { toggleSidebar(); navigation.navigate('AddUser');}}/>
@@ -106,111 +99,151 @@ export default function AdminDashScreen({ navigation }) {
               <SidebarItem icon="graduation-cap" label="Promotion Tool" onPress={() => {toggleSidebar();navigation.navigate('PromotionTool');}}/>
               <SidebarItem icon="shield-alt" label="Security" onPress={() => {toggleSidebar(); navigation.navigate('AdminSetting');}}/>
             </View>
-          </View>
+            {/* -------------------------------------- */}
 
-          {/* Footer: Settings (Left) + Logout Icon (Right) */}
-          <View style={styles.sidebarFooter}>
-            <View style={styles.footerRow}>
-              <TouchableOpacity style={styles.settingsBtn} onPress={() => console.log("Settings pressed")}>
-                <FontAwesome5 name="cog" size={16} color="#64748b" />
-                <Text style={styles.settingsText}>Settings</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.logoutIconBtn} onPress={handleLogout}>
-                <FontAwesome5 name="sign-out-alt" size={16} color="#ef4444" />
-              </TouchableOpacity>
-            </View>
           </View>
+          <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
+            <FontAwesome5 name="sign-out-alt" size={16} color="#ef4444" />
+            <Text style={{ color: '#ef4444', fontWeight: 'bold', marginLeft: 12 }}>Sign Out</Text>
+          </TouchableOpacity>
         </View>
       </Animated.View>
 
-      {/* MAIN CONTENT */}
-      <SafeAreaView style={styles.mainContent} edges={['top', 'left', 'right']}>
+      {/* --- MAIN CONTENT --- */}
+      <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
         
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity onPress={toggleSidebar} style={styles.menuButton}>
+          <View>
+            <Text style={styles.headerTitle}>Admin Console</Text>
+            <Text style={styles.headerSub}>{MOCK_DATA.date}</Text>
+          </View>
+          <TouchableOpacity onPress={toggleSidebar} style={styles.profileBtn}>
             <FontAwesome5 name="bars" size={20} color="#1e293b" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Dashboard</Text>
-          <View style={{ width: 20 }} /> 
         </View>
 
-        {/* Scrollable Body */}
-        <ScrollView 
-          style={styles.scrollBody} 
-          contentContainerStyle={{ paddingBottom: 100 }} // Padding for bottom nav
-          showsVerticalScrollIndicator={false}
-        >
-          <View style={styles.contentPadding}>
-            
-            {/* Stats Grid */}
-            <View style={styles.statsGrid}>
-              <View style={styles.statCard}>
-                <Text style={styles.statLabel}>TOTAL STUDENTS</Text>
-                <Text style={styles.statValue}>450</Text>
-              </View>
-
-              <TouchableOpacity style={styles.statCardActive}>
-                <View style={styles.statCardHeader}>
-                  <Text style={styles.statLabelActive}>DAILY ACTIVE</Text>
-                  <FontAwesome5 name="users" size={12} color="rgba(255,255,255,0.5)" />
-                </View>
-                <Text style={styles.statValueActive}>380<Text style={styles.statTotal}>/450</Text></Text>
-                
-                <View style={styles.viewDefaultersBtn}>
-                  <FontAwesome5 name="eye" size={10} color="#fff" />
-                  <Text style={styles.viewDefaultersText}>View Defaulters</Text>
-                </View>
-              </TouchableOpacity>
+        <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: 100 }} showsVerticalScrollIndicator={false}>
+          
+          {/* 1. HERO SEARCH BAR */}
+          <View style={styles.searchContainer}>
+            <View style={styles.searchBox}>
+              <FontAwesome5 name="search" size={16} color="#94a3b8" />
+              <TextInput 
+                style={styles.searchInput}
+                placeholder="Search student, roll no, or teacher..."
+                placeholderTextColor="#94a3b8"
+                value={searchText}
+                onChangeText={setSearchText}
+              />
             </View>
-
-            {/* Red Flags Section */}
-            <View style={styles.redFlagContainer}>
-              <View style={styles.redFlagHeader}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                  <FontAwesome5 name="exclamation-triangle" size={12} color="#b91c1c" />
-                  <Text style={styles.redFlagTitle}>RED FLAGS</Text>
-                </View>
-                <View style={styles.badge}>
-                  <Text style={styles.badgeText}>2 Classes</Text>
-                </View>
-              </View>
-
-              <View style={styles.redFlagItem}>
-                <View>
-                  <Text style={styles.redFlagClass}>Class 5-C</Text>
-                  <Text style={styles.redFlagReason}>Low Audio</Text>
-                </View>
-                <Text style={styles.redFlagValueRed}>12%</Text>
-              </View>
-
-              <View style={[styles.redFlagItem, { borderBottomWidth: 0 }]}>
-                <View>
-                  <Text style={styles.redFlagClass}>Class 9-A</Text>
-                  <Text style={styles.redFlagReason}>Low Performance</Text>
-                </View>
-                <Text style={styles.redFlagValueOrange}>Avg 62%</Text>
-              </View>
-            </View>
-
           </View>
-        </ScrollView>
 
-        {/* FIXED BOTTOM NAVIGATION BAR */}
-        <View style={styles.bottomNav}>
-          <TouchableOpacity style={styles.navItem}>
-            <FontAwesome5 name="chart-pie" size={20} color="#4f46e5" />
-            <Text style={[styles.navLabel, { color: '#4f46e5' }]}>Dash</Text>
+          {/* 2. PRIVACY FINANCE STRIP */}
+          <TouchableOpacity 
+            style={styles.financeStrip} 
+            activeOpacity={0.9} 
+            onPress={() => setShowFinance(!showFinance)}
+          >
+            <View>
+              <Text style={styles.finLabel}>COLLECTED TODAY</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                {showFinance ? (
+                  <Text style={styles.finAmount}>₹ {MOCK_DATA.financial.collectedToday}</Text>
+                ) : (
+                  <View style={styles.hiddenAmount}>
+                    <View style={styles.dot} /><View style={styles.dot} /><View style={styles.dot} /><View style={styles.dot} />
+                  </View>
+                )}
+                <TouchableOpacity onPress={() => setShowFinance(!showFinance)}>
+                  <FontAwesome5 name={showFinance ? "eye-slash" : "eye"} size={14} color="rgba(255,255,255,0.5)" />
+                </TouchableOpacity>
+              </View>
+            </View>
+            <TouchableOpacity style={styles.finAction}>
+              <Text style={styles.finActionText}>View Report</Text>
+              <FontAwesome5 name="arrow-right" size={10} color="#fff" />
+            </TouchableOpacity>
           </TouchableOpacity>
 
-          {/* Bottom Nav Link to Add User */}
-          <TouchableOpacity 
-            style={styles.navItem}
-            onPress={() => navigation.navigate('AddUser')}
-          >
-            <FontAwesome5 name="user-plus" size={20} color="#94a3b8" />
-            <Text style={styles.navLabel}>Add User</Text>
+          {/* 3. CRITICAL ALERTS */}
+          <Text style={styles.sectionTitle}>REQUIRES ATTENTION</Text>
+          <View style={styles.alertRow}>
+            {/* Locked Users Card */}
+            <TouchableOpacity style={styles.alertCard} onPress={() => navigation.navigate('StudentRegistry', { filter: 'locked' })}>
+              <View style={styles.alertIconBox}>
+                <FontAwesome5 name="lock" size={14} color="#dc2626" />
+              </View>
+              <Text style={styles.alertVal}>{MOCK_DATA.alerts.lockedUsers}</Text>
+              <Text style={styles.alertDesc}>Locked Users</Text>
+            </TouchableOpacity>
+
+            {/* Pending Approvals Card */}
+            <TouchableOpacity style={[styles.alertCard, styles.alertCardBlue]}>
+              <View style={[styles.alertIconBox, styles.iconBoxBlue]}>
+                <FontAwesome5 name="user-clock" size={14} color="#2563eb" />
+              </View>
+              <Text style={[styles.alertVal, styles.textBlue]}>{MOCK_DATA.alerts.pendingApprovals}</Text>
+              <Text style={[styles.alertDesc, styles.textBlue]}>Pending Reg</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* 4. MANAGEMENT GRID */}
+          <Text style={styles.sectionTitle}>QUICK ACTIONS</Text>
+          <View style={styles.gridContainer}>
+            
+            <ActionCard 
+              icon="user-plus" 
+              label="New Admission" 
+              sub="Student / Teacher"
+              color="#4f46e5" 
+              bg="#eef2ff"
+              onPress={() => navigation.navigate('AddUser')}
+            />
+
+            <ActionCard 
+              icon="bullhorn" 
+              label="Broadcast" 
+              sub="Send Notice"
+              color="#ea580c" 
+              bg="#fff7ed"
+              onPress={() => navigation.navigate('Broadcast')}
+            />
+
+            <ActionCard 
+              icon="file-invoice-dollar" 
+              label="Fee Structure" 
+              sub="Assign Fees"
+              color="#16a34a" 
+              bg="#f0fdf4"
+              onPress={() => alert("Fee Manager Coming Soon")} 
+            />
+
+            <ActionCard 
+              icon="unlock-alt" 
+              label="Unlock User" 
+              sub="One-time Override"
+              color="#dc2626" 
+              bg="#fef2f2"
+              onPress={() => navigation.navigate('StudentRegistry')} 
+            />
+
+          </View>
+
+        </ScrollView>
+
+        {/* Bottom Navigation */}
+        <View style={styles.bottomNav}>
+          <TouchableOpacity style={styles.navItem}>
+            <FontAwesome5 name="th-large" size={20} color="#4f46e5" />
+            <Text style={[styles.navLabel, { color: '#4f46e5' }]}>Console</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.navItem} onPress={() => navigation.navigate('StudentRegistry')}>
+            <FontAwesome5 name="users" size={20} color="#94a3b8" />
+            <Text style={styles.navLabel}>Registry</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.navItem} onPress={() => navigation.navigate('AddUser')}>
+            <FontAwesome5 name="plus-circle" size={24} color="#94a3b8" />
           </TouchableOpacity>
         </View>
 
@@ -219,319 +252,90 @@ export default function AdminDashScreen({ navigation }) {
   );
 }
 
-/* --- SUB-COMPONENTS --- */
+// --- SUB COMPONENTS ---
 
-// UPDATED: SidebarItem now accepts and uses onPress
-const SidebarItem = ({ icon, label, active, onPress }) => (
-  <TouchableOpacity 
-    style={[styles.sidebarItem, active && styles.sidebarItemActive]}
-    onPress={onPress}
-  >
-    <FontAwesome5 name={icon} size={16} color={active ? "#4f46e5" : "#64748b"} style={{ width: 24 }} />
-    <Text style={[styles.sidebarItemText, active && { color: "#4f46e5", fontWeight: '700' }]}>{label}</Text>
+const ActionCard = ({ icon, label, sub, color, bg, onPress }) => (
+  <TouchableOpacity style={styles.manageCard} onPress={onPress} activeOpacity={0.7}>
+    <View style={[styles.iconCircle, { backgroundColor: bg }]}>
+      <FontAwesome5 name={icon} size={18} color={color} />
+    </View>
+    <View>
+      <Text style={styles.cardTxt}>{label}</Text>
+      <Text style={styles.cardSub}>{sub}</Text>
+    </View>
   </TouchableOpacity>
 );
 
-/* --- STYLES --- */
+const SidebarItem = ({ icon, label, active, onPress }) => (
+  <TouchableOpacity style={[styles.sidebarItem, active && styles.sidebarItemActive]} onPress={onPress}>
+    <FontAwesome5 name={icon} size={16} color={active ? "#4f46e5" : "#64748b"} style={{ width: 24 }} />
+    <Text style={[styles.sidebarItemText, active && { color: "#4f46e5" }]}>{label}</Text>
+  </TouchableOpacity>
+);
+
+// --- STYLES ---
 const styles = StyleSheet.create({
-  // ... Copy your existing styles from the previous file here ...
-  // Make sure to include all styles provided previously
-  container: {
-    flex: 1,
-    backgroundColor: "#F8FAFC", // Slate 50
-  },
+  container: { flex: 1, backgroundColor: "#F8FAFC" },
+  safeArea: { flex: 1 },
   
-  /* Overlay */
-  overlay: {
-    position: "absolute",
-    inset: 0,
-    backgroundColor: "rgba(0,0,0,0.5)",
-    zIndex: 50,
-  },
-
   /* Sidebar */
-  sidebar: {
-    position: "absolute",
-    left: 0,
-    top: 0,
-    bottom: 0,
-    width: SIDEBAR_WIDTH,
-    backgroundColor: "#fff",
-    zIndex: 51,
-    elevation: 20,
-    shadowColor: "#000",
-    shadowOffset: { width: 5, height: 0 },
-    shadowOpacity: 0.2,
-    shadowRadius: 10,
-  },
-  sidebarContainer: {
-    flex: 1,
-    paddingTop: Platform.OS === 'ios' ? 50 : 20,
-    paddingHorizontal: 20,
-    justifyContent: 'space-between',
-    paddingBottom: 20,
-  },
-  sidebarHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    marginBottom: 30,
-    paddingBottom: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f1f5f9'
-  },
-  logoBox: {
-    width: 40,
-    height: 40,
-    backgroundColor: '#4f46e5',
-    borderRadius: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  logoText: {
-    color: 'white',
-    fontWeight: 'bold',
-    fontSize: 20,
-  },
-  sidebarTitle: {
-    fontWeight: 'bold',
-    fontSize: 16,
-    color: '#1e293b',
-  },
-  sidebarVersion: {
-    fontSize: 11,
-    color: '#94a3b8',
-  },
-  menuSection: {
-    gap: 8,
-  },
-  sidebarItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-  },
-  sidebarItemActive: {
-    backgroundColor: '#eef2ff',
-  },
-  sidebarItemText: {
-    fontSize: 14,
-    color: '#64748b',
-    fontWeight: '600',
-  },
-  sidebarFooter: {
-    borderTopWidth: 1,
-    borderTopColor: '#f1f5f9',
-    paddingTop: 10,
-  },
-  footerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-  },
-  settingsBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  settingsText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#64748b',
-  },
-  logoutIconBtn: {
-    padding: 4,
-  },
+  overlay: { position: "absolute", inset: 0, backgroundColor: "rgba(0,0,0,0.5)", zIndex: 50 },
+  sidebar: { position: "absolute", left: 0, top: 0, bottom: 0, width: SIDEBAR_WIDTH, backgroundColor: "#fff", zIndex: 51, elevation: 20 },
+  sidebarContainer: { flex: 1, paddingTop: Platform.OS === 'ios' ? 50 : 20, paddingHorizontal: 20, justifyContent: 'space-between', paddingBottom: 20 },
+  sidebarHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 30, paddingBottom: 20, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
+  logoBox: { width: 40, height: 40, backgroundColor: '#4f46e5', borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
+  logoText: { color: 'white', fontWeight: 'bold', fontSize: 20 },
+  sidebarTitle: { fontWeight: 'bold', fontSize: 16, color: '#1e293b' },
+  sidebarVersion: { fontSize: 11, color: '#94a3b8' },
+  menuSection: { gap: 8 },
+  sidebarItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 12, borderRadius: 12 },
+  sidebarItemActive: { backgroundColor: '#eef2ff' },
+  sidebarItemText: { fontSize: 14, color: '#64748b', fontWeight: '600' },
+  logoutBtn: { flexDirection: 'row', alignItems: 'center', padding: 16, borderTopWidth: 1, borderTopColor: '#f1f5f9' },
 
-  /* Main Area */
-  mainContent: {
-    flex: 1,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 15,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#f1f5f9',
-  },
-  headerTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#1e293b',
-  },
-  scrollBody: {
-    flex: 1,
-  },
-  contentPadding: {
-    padding: 20,
-  },
+  /* Header */
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 24, paddingVertical: 20, backgroundColor: '#fff', paddingTop: Platform.OS === 'android' ? 20 : 0 },
+  headerTitle: { fontSize: 22, fontWeight: '800', color: '#1e293b' },
+  headerSub: { fontSize: 12, color: '#64748b', fontWeight: '600', marginTop: 2 },
+  profileBtn: { width: 40, height: 40, backgroundColor: '#f1f5f9', borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
 
-  /* Stats Cards */
-  statsGrid: {
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 20,
-  },
-  statCard: {
-    flex: 1,
-    backgroundColor: '#fff',
-    padding: 16,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#f1f5f9',
-  },
-  statLabel: {
-    fontSize: 10,
-    fontWeight: 'bold',
-    color: '#94a3b8',
-    marginBottom: 4,
-  },
-  statValue: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#1e293b',
-  },
-  statCardActive: {
-    flex: 1,
-    backgroundColor: '#4f46e5',
-    padding: 16,
-    borderRadius: 16,
-    shadowColor: '#4f46e5',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 5,
-  },
-  statCardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 4,
-  },
-  statLabelActive: {
-    fontSize: 10,
-    fontWeight: 'bold',
-    color: '#c7d2fe',
-  },
-  statValueActive: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#fff',
-  },
-  statTotal: {
-    fontSize: 14,
-    color: 'rgba(255,255,255,0.6)',
-  },
-  viewDefaultersBtn: {
-    marginTop: 8,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    alignSelf: 'flex-start',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  viewDefaultersText: {
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: 'bold',
-  },
+  /* Content */
+  content: { flex: 1 },
+  
+  /* Search */
+  searchContainer: { paddingHorizontal: 24, marginBottom: 20 },
+  searchBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 16, paddingHorizontal: 16, height: 50, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 5, elevation: 2 },
+  searchInput: { flex: 1, marginLeft: 12, fontSize: 14, color: '#1e293b' },
 
-  /* Red Flags */
-  redFlagContainer: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#fee2e2',
-    overflow: 'hidden',
-  },
-  redFlagHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#fef2f2',
-    padding: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#fee2e2',
-  },
-  redFlagTitle: {
-    fontSize: 12,
-    fontWeight: 'bold',
-    color: '#b91c1c',
-  },
-  badge: {
-    backgroundColor: '#fff',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: '#fecaca',
-  },
-  badgeText: {
-    fontSize: 10,
-    fontWeight: 'bold',
-    color: '#ef4444',
-  },
-  redFlagItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f1f5f9',
-  },
-  redFlagClass: {
-    fontSize: 13,
-    fontWeight: 'bold',
-    color: '#1e293b',
-  },
-  redFlagReason: {
-    fontSize: 11,
-    color: '#64748b',
-  },
-  redFlagValueRed: {
-    fontSize: 13,
-    fontWeight: 'bold',
-    color: '#ef4444',
-  },
-  redFlagValueOrange: {
-    fontSize: 13,
-    fontWeight: 'bold',
-    color: '#f97316',
-  },
+  /* Finance Strip */
+  financeStrip: { marginHorizontal: 24, marginBottom: 24, backgroundColor: '#1e293b', borderRadius: 16, padding: 20, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', shadowColor: '#1e293b', shadowOffset: {width:0, height:4}, shadowOpacity: 0.3, shadowRadius: 8, elevation: 5 },
+  finLabel: { fontSize: 10, color: 'rgba(255,255,255,0.6)', fontWeight: '700', letterSpacing: 1, marginBottom: 6 },
+  finAmount: { fontSize: 22, fontWeight: '700', color: '#fff' },
+  hiddenAmount: { flexDirection: 'row', gap: 4, height: 26, alignItems: 'center' },
+  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.3)' },
+  finAction: { backgroundColor: 'rgba(255,255,255,0.1)', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  finActionText: { color: '#fff', fontSize: 12, fontWeight: '600' },
 
-  /* BOTTOM NAVIGATION (The Sticky Part) */
-  bottomNav: {
-    flexDirection: 'row',
-    backgroundColor: '#fff',
-    borderTopWidth: 1,
-    borderTopColor: '#e2e8f0',
-    paddingVertical: 10,
-    paddingBottom: Platform.OS === 'ios' ? 25 : 10, // Safe area handling
-    justifyContent: 'space-around',
-    alignItems: 'center',
-    elevation: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-  },
-  navItem: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 20,
-  },
-  navLabel: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: '#94a3b8',
-    marginTop: 4,
-  },
+  /* Alerts */
+  sectionTitle: { fontSize: 12, fontWeight: '700', color: '#94a3b8', marginHorizontal: 24, marginBottom: 12, letterSpacing: 0.5 },
+  alertRow: { flexDirection: 'row', gap: 12, marginHorizontal: 24, marginBottom: 24 },
+  alertCard: { flex: 1, backgroundColor: '#fef2f2', padding: 16, borderRadius: 16, borderWidth: 1, borderColor: '#fee2e2' },
+  alertCardBlue: { backgroundColor: '#eff6ff', borderColor: '#dbeafe' },
+  alertIconBox: { alignSelf: 'flex-start', padding: 6, backgroundColor: '#fff', borderRadius: 8, marginBottom: 10 },
+  iconBoxBlue: { backgroundColor: '#fff' },
+  alertVal: { fontSize: 20, fontWeight: '800', color: '#b91c1c' },
+  alertDesc: { fontSize: 12, fontWeight: '600', color: '#991b1b' },
+  textBlue: { color: '#1e40af' },
+
+  /* Grid */
+  gridContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, paddingHorizontal: 24 },
+  manageCard: { width: (width - 60) / 2, backgroundColor: '#fff', padding: 16, borderRadius: 16, borderWidth: 1, borderColor: '#e2e8f0', shadowColor: '#000', shadowOpacity: 0.02, shadowRadius: 4, elevation: 1, gap: 12 },
+  iconCircle: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
+  cardTxt: { fontSize: 14, fontWeight: '700', color: '#334155' },
+  cardSub: { fontSize: 11, color: '#94a3b8' },
+
+  /* Bottom Nav */
+  bottomNav: { flexDirection: 'row', backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#e2e8f0', paddingVertical: 12, paddingBottom: Platform.OS === 'ios' ? 25 : 12, justifyContent: 'space-around', alignItems: 'center', position: 'absolute', bottom: 0, width: '100%' },
+  navItem: { alignItems: 'center', gap: 4 },
+  navLabel: { fontSize: 10, fontWeight: '600', color: '#94a3b8' },
 });
