@@ -3,25 +3,33 @@ import api from '../services/api';
 import { User, Lock, ArrowRight } from 'lucide-react';
 
 const Login = () => {
-  const [mobile, setMobile] = useState('');
+  const [loginId, setLoginId] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleLogin = async (e) => {
     e.preventDefault();
+
+    if (!loginId.trim() || !password.trim()) {
+      alert('Please fill all fields');
+      return;
+    }
+
     setLoading(true);
 
     try {
       const res = await api.post('/auth/login', {
-        mobile,
-        password,
         role: 'admin',
+        input: loginId.trim(),   // ✅ backend expects "input"
+        password: password.trim()
       });
 
       localStorage.setItem('token', res.data.token);
       localStorage.setItem('user', JSON.stringify(res.data.user));
+
       window.location.href = '/';
     } catch (error) {
+      console.error('Login Error:', error);
       alert(
         'Login Failed: ' +
           (error.response?.data?.message || 'Invalid credentials')
@@ -42,18 +50,18 @@ const Login = () => {
 
         {/* Form */}
         <form onSubmit={handleLogin} style={styles.form}>
-          {/* Mobile */}
+          {/* Admin Key / Mobile */}
           <div>
-            <label style={styles.label}>Mobile Number / Login ID</label>
+            <label style={styles.label}>Admin Key / Mobile</label>
             <div style={styles.inputWrapper}>
               <User size={18} style={styles.icon} />
               <input
                 type="text"
-                placeholder="Enter Admin ID"
-                value={mobile}
-                onChange={(e) => setMobile(e.target.value)}
-                required
+                placeholder="Enter Admin Key"
+                value={loginId}
+                onChange={(e) => setLoginId(e.target.value)}
                 style={styles.input}
+                required
               />
             </div>
           </div>
@@ -68,14 +76,22 @@ const Login = () => {
                 placeholder="Enter Password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                required
                 style={styles.input}
+                required
               />
             </div>
           </div>
 
           {/* Button */}
-          <button type="submit" disabled={loading} style={styles.button}>
+          <button
+            type="submit"
+            disabled={loading}
+            style={{
+              ...styles.button,
+              opacity: loading ? 0.7 : 1,
+              cursor: loading ? 'not-allowed' : 'pointer',
+            }}
+          >
             {loading ? (
               'Signing In...'
             ) : (
@@ -95,6 +111,10 @@ const Login = () => {
   );
 };
 
+/* =======================
+   Internal CSS Styles
+======================= */
+
 const styles = {
   container: {
     minHeight: '100vh',
@@ -105,7 +125,7 @@ const styles = {
   },
   card: {
     width: '100%',
-    maxWidth: '420px', // 🔥 THIS fixes stretched inputs
+    maxWidth: '420px', // 🔥 prevents full-width stretch
     backgroundColor: '#ffffff',
     padding: '32px',
     borderRadius: '14px',
@@ -115,6 +135,7 @@ const styles = {
     fontSize: '24px',
     fontWeight: 600,
     marginBottom: '6px',
+    color: '#0f172a',
   },
   subtitle: {
     fontSize: '14px',
@@ -160,7 +181,6 @@ const styles = {
     color: '#ffffff',
     fontSize: '15px',
     fontWeight: 500,
-    cursor: 'pointer',
   },
   buttonContent: {
     display: 'flex',
