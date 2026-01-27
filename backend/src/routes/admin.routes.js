@@ -1,6 +1,7 @@
 import express from "express";
 import { 
   onboardUser, 
+  onboardBulkUsers,
   getTeacherRegistry, 
   getStudentRegistry, 
   sendBroadcast,        
@@ -28,6 +29,7 @@ const adminCheck = (req, res, next) => {
  */
 // We use 'auth' (your import) and 'adminCheck' (defined above)
 router.post("/onboard", auth, adminCheck, onboardUser);
+router.post("/onboard-bulk", auth, adminCheck, onboardBulkUsers);
 
 router.get("/teachers", auth, getTeacherRegistry);
 router.get("/students", auth, getStudentRegistry);

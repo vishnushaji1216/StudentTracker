@@ -69,6 +69,74 @@ export const onboardUser = async (req, res) => {
   }
 };
 
+export const onboardBulkUsers = async (req, res) => {
+  try {
+    const { users } = req.body; // Expects array: [{ role, name, mobile, className, rollNo }]
+
+    if (!users || !Array.isArray(users) || users.length === 0) {
+      return res.status(400).json({ message: "No users provided" });
+    }
+
+    const studentsToInsert = [];
+    const errors = [];
+
+    // Process loop
+    for (const [index, user] of users.entries()) {
+      try {
+        // Generate Password
+        const plainPassword = generateDefaultPassword(user.name, user.mobile);
+        const hashedPassword = await bcrypt.hash(plainPassword, 10);
+
+        if (user.role === 'student') {
+          studentsToInsert.push({
+            name: user.name,
+            mobile: user.mobile,
+            password: hashedPassword,
+            className: user.className,
+            rollNo: user.rollNo,
+            role: 'student' // Explicitly set role
+          });
+        }
+      } catch (err) {
+        errors.push({ row: index + 1, error: err.message });
+      }
+    }
+
+    // Bulk Insert (ordered: false allows valid rows to insert even if some fail)
+    let insertedCount = 0;
+    if (studentsToInsert.length > 0) {
+      try {
+        const result = await Student.insertMany(studentsToInsert, { ordered: false });
+        insertedCount = result.length;
+      } catch (e) {
+        // insertMany throws error if ANY doc fails, but keeps successful ones if ordered: false
+        insertedCount = e.insertedDocs.length;
+        // Collect duplicate key errors
+        e.writeErrors.forEach(err => {
+          errors.push({ 
+            msg: `Duplicate detected`, 
+            detail: err.errmsg.includes('rollNo') ? 'Roll No exists' : 'Mobile exists' 
+          });
+        });
+      }
+    }
+
+    res.status(201).json({
+      message: "Bulk Import Processed",
+      summary: {
+        totalReceived: users.length,
+        successfullyAdded: insertedCount,
+        failed: errors.length
+      },
+      errors: errors.length > 0 ? errors : null
+    });
+
+  } catch (error) {
+    console.error("Bulk Error:", error);
+    res.status(500).json({ message: "Server error during bulk import", error: error.message });
+  }
+};
+
 export const getTeacherRegistry = async (req, res) => {
   try {
     const { search } = req.query;
