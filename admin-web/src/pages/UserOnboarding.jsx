@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import { 
   Upload, FileSpreadsheet, ArrowRight, UserPlus, Info, Check, 
-  Trash2, Plus, AlertCircle, ChevronRight, User 
+  Trash2, Plus, ChevronRight, User 
 } from 'lucide-react';
 import api from '../services/api';
 
@@ -33,10 +33,7 @@ const UserOnboarding = () => {
   // --- HANDLERS: RESET & SWITCH ---
   const handleRoleSwitch = (newRole) => {
     setRole(newRole);
-    // If Teacher, force 'single'. If Student, default to 'bulk'
     setMode(newRole === 'teacher' ? 'single' : 'bulk');
-    
-    // Reset all states
     setStep(1); setFileData([]); setFileName(''); setSelectedClass('');
     setStudentForm({ name: '', mobile: '', className: '', rollNo: '' });
     setTeacherForm({ name: '', mobile: '', classTeachership: '' });
@@ -88,7 +85,6 @@ const UserOnboarding = () => {
     } catch (error) { alert("Error: " + (error.response?.data?.message || error.message)); }
   };
 
-  // --- HANDLER: SINGLE STUDENT CREATE ---
   const handleCreateStudent = async () => {
     if(!studentForm.name || !studentForm.mobile || !studentForm.className || !studentForm.rollNo) {
       return alert("All fields are required for a student.");
@@ -100,7 +96,6 @@ const UserOnboarding = () => {
     } catch(e) { alert(e.message); }
   };
   
-  // --- HANDLER: SINGLE TEACHER CREATE ---
   const handleCreateTeacher = async () => {
     if(!teacherForm.name || !teacherForm.mobile) return alert("Name/Mobile required");
     try {
@@ -125,8 +120,6 @@ const UserOnboarding = () => {
           <h1>User Onboarding</h1>
           <p>Register new {role}s into the ecosystem.</p>
         </div>
-        
-        {/* Role Toggle */}
         <div style={{ background: '#e2e8f0', padding: '4px', borderRadius: '8px', display: 'flex' }}>
           {['student', 'teacher'].map(r => (
             <button 
@@ -146,7 +139,7 @@ const UserOnboarding = () => {
         </div>
       </div>
 
-      {/* MODE TABS (Only visible for Students) */}
+      {/* MODE TABS (Students Only) */}
       {role === 'student' ? (
         <div className="flex justify-center gap-6 mb-8 border-b border-slate-200">
           {['bulk', 'single'].map(m => (
@@ -171,9 +164,7 @@ const UserOnboarding = () => {
         </div>
       )}
 
-      {/* ========================================================= */}
-      {/* STUDENT BULK VIEW */}
-      {/* ========================================================= */}
+      {/* --- STUDENT BULK --- */}
       {role === 'student' && mode === 'bulk' && (
         <div className="card">
           <div className="flex items-center justify-between mb-8 pb-6 border-b border-slate-100">
@@ -209,7 +200,13 @@ const UserOnboarding = () => {
               <div className="flex items-center gap-2 mb-4 font-bold text-slate-700"><FileSpreadsheet className="text-green-600"/> {fileName}</div>
               <div className="table-wrapper mb-6">
                 <table>
-                  <thead><tr><th>Database Field</th><th>Mapping</th><th>Excel Header</th></tr></thead>
+                  <thead>
+                    <tr>
+                      <th style={{textAlign:'left'}}>Database Field</th>
+                      <th style={{textAlign:'center'}}>Mapping</th>
+                      <th style={{textAlign:'left'}}>Excel Header</th>
+                    </tr>
+                  </thead>
                   <tbody>
                     <MappingRow label="Full Name" value={mapping.name} onChange={v=>setMapping({...mapping, name:v})} options={fileHeaders} required />
                     <MappingRow label="Mobile" value={mapping.mobile} onChange={v=>setMapping({...mapping, mobile:v})} options={fileHeaders} required />
@@ -228,8 +225,15 @@ const UserOnboarding = () => {
           {step === 3 && (
             <div className="animate-fade-in">
               <div className="table-container" style={{ maxHeight: '400px', overflowY: 'auto' }}>
-                <table className="modern-table">
-                  <thead><tr><th>Status</th><th>Name</th><th>Mobile</th><th>Class</th></tr></thead>
+                <table className="modern-table" style={{width: '100%'}}>
+                  <thead>
+                    <tr>
+                      <th style={{textAlign:'left'}}>Status</th>
+                      <th style={{textAlign:'left'}}>Name</th>
+                      <th style={{textAlign:'left'}}>Mobile</th>
+                      <th style={{textAlign:'left'}}>Class</th>
+                    </tr>
+                  </thead>
                   <tbody>
                     {cleanData.map((row, i) => (
                       <tr key={i} style={{ background: row.isValid ? 'transparent' : '#fff1f2' }}>
@@ -248,9 +252,7 @@ const UserOnboarding = () => {
         </div>
       )}
 
-      {/* ========================================================= */}
-      {/* STUDENT SINGLE VIEW (NEW) */}
-      {/* ========================================================= */}
+      {/* --- STUDENT SINGLE --- */}
       {role === 'student' && mode === 'single' && (
         <div className="card">
           <div className="mb-6 flex items-center gap-3 p-4 bg-slate-50 rounded-xl border border-slate-200">
@@ -263,41 +265,25 @@ const UserOnboarding = () => {
              </div>
           </div>
 
-          <div className="grid-2 mb-6">
+          <div className="grid-2 mb-6" style={{ alignItems: 'start' }}>
             <div>
               <label>Full Name <span className="text-red-500">*</span></label>
-              <input 
-                className="input-field" placeholder="e.g. Rahul Kumar"
-                value={studentForm.name} 
-                onChange={e => setStudentForm({...studentForm, name: e.target.value})}
-              />
+              <input className="input-field" placeholder="e.g. Rahul Kumar" value={studentForm.name} onChange={e => setStudentForm({...studentForm, name: e.target.value})} />
             </div>
             <div>
               <label>Parent Mobile (Login ID) <span className="text-red-500">*</span></label>
-              <input 
-                className="input-field" placeholder="98765 43210" maxLength={10}
-                value={studentForm.mobile} 
-                onChange={e => setStudentForm({...studentForm, mobile: e.target.value})}
-              />
+              <input className="input-field" placeholder="98765 43210" maxLength={10} value={studentForm.mobile} onChange={e => setStudentForm({...studentForm, mobile: e.target.value})} />
             </div>
             <div>
               <label>Class <span className="text-red-500">*</span></label>
-              <select 
-                className="input-field"
-                value={studentForm.className}
-                onChange={e => setStudentForm({...studentForm, className: e.target.value})}
-              >
+              <select className="input-field" value={studentForm.className} onChange={e => setStudentForm({...studentForm, className: e.target.value})}>
                 <option value="">-- Select Class --</option>
                 {CLASS_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
               </select>
             </div>
             <div>
               <label>Roll Number <span className="text-red-500">*</span></label>
-              <input 
-                className="input-field" placeholder="e.g. 101"
-                value={studentForm.rollNo} 
-                onChange={e => setStudentForm({...studentForm, rollNo: e.target.value})}
-              />
+              <input className="input-field" placeholder="e.g. 101" value={studentForm.rollNo} onChange={e => setStudentForm({...studentForm, rollNo: e.target.value})} />
             </div>
           </div>
 
@@ -309,38 +295,29 @@ const UserOnboarding = () => {
         </div>
       )}
 
-      {/* ========================================================= */}
-      {/* TEACHER SINGLE VIEW */}
-      {/* ========================================================= */}
+      {/* --- TEACHER SINGLE (FIXED ALIGNMENT) --- */}
       {role === 'teacher' && (
         <div className="card">
-          <div className="grid-2 mb-6">
+          <div className="grid-2 mb-6" style={{ alignItems: 'start' }}>
             <div>
               <label>Full Name <span className="text-red-500">*</span></label>
-              <input 
-                className="input-field" placeholder="e.g. Dr. A.P.J. Abdul"
-                value={teacherForm.name} 
-                onChange={e => setTeacherForm({...teacherForm, name: e.target.value})}
-              />
+              <input className="input-field" placeholder="e.g. Dr. A.P.J. Abdul" value={teacherForm.name} onChange={e => setTeacherForm({...teacherForm, name: e.target.value})} />
             </div>
             <div>
               <label>Mobile Number (Login ID) <span className="text-red-500">*</span></label>
-              <input 
-                className="input-field" placeholder="98765 43210" maxLength={10}
-                value={teacherForm.mobile} 
-                onChange={e => setTeacherForm({...teacherForm, mobile: e.target.value})}
-              />
+              <input className="input-field" placeholder="98765 43210" maxLength={10} value={teacherForm.mobile} onChange={e => setTeacherForm({...teacherForm, mobile: e.target.value})} />
             </div>
           </div>
 
-          <div className="info-box mb-8">
-            <Info className="text-indigo-600 flex-shrink-0" size={24} />
+          {/* Info Box with Fixed Icon Alignment */}
+          <div className="mb-8" style={{ display: 'flex', gap: '16px', alignItems: 'flex-start', padding: '20px', backgroundColor: '#eef2ff', border: '1px solid #c7d2fe', borderRadius: '12px' }}>
+            <Info className="text-indigo-600 flex-shrink-0" size={22} style={{ marginTop: '2px' }} />
             <div className="flex-1">
-              <label className="text-indigo-900 mb-1">Class Teachership (Optional)</label>
+              <label className="text-indigo-900 mb-1" style={{ fontSize: '15px' }}>Class Teachership (Optional)</label>
               <p className="text-indigo-700 text-sm mb-3">Is this teacher responsible for a specific class?</p>
               <select 
                 className="input-field" 
-                style={{ borderColor: '#c7d2fe', backgroundColor: '#eef2ff' }}
+                style={{ borderColor: '#c7d2fe', backgroundColor: 'white' }}
                 value={teacherForm.classTeachership} 
                 onChange={e => setTeacherForm({...teacherForm, classTeachership: e.target.value})}
               >
@@ -350,52 +327,50 @@ const UserOnboarding = () => {
             </div>
           </div>
 
+          {/* Subject Assignments Table with Left Alignment */}
           <div className="mb-8">
             <div className="flex justify-between items-end mb-3">
-              <label>Subject Assignments</label>
+              <label style={{ fontSize: '16px' }}>Subject Assignments</label>
               <span className="text-xs text-slate-500">Assign classes and subjects</span>
             </div>
             <div className="table-wrapper">
               <table>
                 <thead>
                   <tr>
-                    <th style={{ width: '35%' }}>Class</th>
-                    <th style={{ width: '55%' }}>Subject</th>
+                    <th style={{ width: '35%', textAlign: 'left', paddingLeft: '160px' }}>Class</th>
+                    <th style={{ width: '55%', textAlign: 'left', paddingLeft: '290px' }}>Subject</th>
                     <th style={{ width: '10%' }}></th>
                   </tr>
                 </thead>
                 <tbody>
                   {assignments.map((assign, i) => (
                     <tr key={i}>
-                      <td>
+                      <td style={{ verticalAlign: 'top' }}>
                         <select 
                           className="input-field"
                           value={assign.class}
-                          onChange={(e) => {
-                            const list = [...assignments]; list[i].class = e.target.value; setAssignments(list);
-                          }}
+                          onChange={(e) => { const list = [...assignments]; list[i].class = e.target.value; setAssignments(list); }}
                         >
                           <option value="">-- Select Class --</option>
                           {CLASS_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
                         </select>
                       </td>
-                      <td>
+                      <td style={{ verticalAlign: 'top' }}>
                         <select 
                           className="input-field"
                           value={assign.subject}
-                          onChange={(e) => {
-                            const list = [...assignments]; list[i].subject = e.target.value; setAssignments(list);
-                          }}
+                          onChange={(e) => { const list = [...assignments]; list[i].subject = e.target.value; setAssignments(list); }}
                         >
                           <option value="">-- Select Subject --</option>
                           {SUBJECT_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
                         </select>
                       </td>
-                      <td className="text-center">
+                      <td className="text-center" style={{ verticalAlign: 'top', paddingTop: '18px' }}>
                         {assignments.length > 1 && (
                           <button 
                             onClick={() => { const list = [...assignments]; list.splice(i, 1); setAssignments(list); }}
                             className="text-slate-400 hover:text-red-500 transition-colors"
+                            style={{ background: 'none', border: 'none', cursor: 'pointer' }}
                           >
                             <Trash2 size={18} />
                           </button>

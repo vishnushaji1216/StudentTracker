@@ -3,8 +3,6 @@ import dotenv from "dotenv";
 import cors from "cors";
 import connectDB from "./config/db.js"; 
 
-import { setupAdmin } from "./admin.js";
-
 import authRoutes from "./routes/auth.routes.js";
 import adminRoutes from "./routes/admin.routes.js"; 
 import teacherRoutes from "./routes/teacher.routes.js";
@@ -14,8 +12,6 @@ dotenv.config();
 connectDB();
 
 const app = express();
-
-setupAdmin(app);
 
 app.use((req, res, next) => {
   console.log(`📡 Request received: ${req.method} ${req.url}`);

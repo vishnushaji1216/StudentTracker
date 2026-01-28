@@ -1,8 +1,11 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import Login from './pages/Login';
 import Sidebar from './components/Sidebar';
 import UserOnboarding from './pages/UserOnboarding';
-import Login from './pages/Login'; // Import the new page
+import Registry from './pages/Registry';
+import StudentDetail from './pages/StudentDetail';
+import TeacherDetail from './pages/TeacherDetail'; // We will build this next
 
 // Layout Wrapper
 const AdminLayout = ({ children }) => (
@@ -17,10 +20,7 @@ const AdminLayout = ({ children }) => (
 // Protected Route Guard
 const ProtectedRoute = ({ children }) => {
   const token = localStorage.getItem('token');
-  // Simple check: If no token, redirect to login
-  if (!token) {
-    return <Navigate to="/login" replace />;
-  }
+  if (!token) return <Navigate to="/login" replace />;
   return children;
 };
 
@@ -31,25 +31,25 @@ function App() {
         <Route path="/login" element={<Login />} />
         
         {/* Protected Routes */}
-        <Route path="/" element={
-          <ProtectedRoute>
-            <AdminLayout>
-               {/* Dashboard Placeholder */}
-               <div className="p-10 font-bold text-2xl">Dashboard Overview</div>
-            </AdminLayout>
-          </ProtectedRoute>
-        } />
+        <Route path="/" element={<Navigate to="/registry" />} />
         
         <Route path="/onboard" element={
-          <ProtectedRoute>
-            <AdminLayout>
-              <UserOnboarding />
-            </AdminLayout>
-          </ProtectedRoute>
+          <ProtectedRoute><AdminLayout><UserOnboarding /></AdminLayout></ProtectedRoute>
         } />
         
-        {/* Redirect Root */}
-        <Route path="*" element={<Navigate to="/" />} />
+        <Route path="/registry" element={
+          <ProtectedRoute><AdminLayout><Registry /></AdminLayout></ProtectedRoute>
+        } />
+
+        {/* --- DETAIL ROUTES (The Missing Link) --- */}
+        <Route path="/student/:id" element={
+          <ProtectedRoute><AdminLayout><StudentDetail /></AdminLayout></ProtectedRoute>
+        } />
+        
+        <Route path="/teacher/:id" element={
+          <ProtectedRoute><AdminLayout><TeacherDetail /></AdminLayout></ProtectedRoute>
+        } />
+        
       </Routes>
     </Router>
   );

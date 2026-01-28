@@ -6,7 +6,11 @@ import {
   getStudentRegistry, 
   sendBroadcast,        
   getBroadcastHistory,
-  deleteNotice
+  deleteNotice,
+  getStudentDetail,
+  updateStudentProfile,
+  getTeacherDetail, 
+  updateTeacherProfile
 } from "../controllers/admin.controller.js";
 import auth from "../middleware/auth.middleware.js";
 
@@ -33,6 +37,12 @@ router.post("/onboard-bulk", auth, adminCheck, onboardBulkUsers);
 
 router.get("/teachers", auth, getTeacherRegistry);
 router.get("/students", auth, getStudentRegistry);
+
+router.get("/teacher/:id", auth, getTeacherDetail);
+router.put("/teacher/:id", auth, updateTeacherProfile);
+
+router.get("/student/:id", auth, adminCheck, getStudentDetail); 
+router.put("/student/:id", auth, adminCheck, updateStudentProfile);
 
 // --- BROADCAST ROUTES ---
 // Replaced 'protect' with 'auth' and 'admin' with 'adminCheck'

@@ -1,6 +1,7 @@
 import Teacher from "../models/teacher.model.js";
 import Student from "../models/student.model.js";
 import Announcement from "../models/announcement.model.js";
+import Submission from "../models/submission.model.js";
 import bcrypt from "bcryptjs";
 
 // Helper function to generate the password
@@ -199,9 +200,9 @@ export const getStudentRegistry = async (req, res) => {
     }
 
     // If no class selected and no search, we return empty list or specific message
-    if (!className && !search) {
-      return res.status(200).json([]);
-    }
+    // if (!className && !search) {
+    //   return res.status(200).json([]);
+    // }
 
     const students = await Student.find(query);
 
@@ -284,5 +285,132 @@ export const deleteNotice = async (req, res) => {
   } catch (error) {
     console.error("Delete Error:", error);
     res.status(500).json({ message: "Failed to delete notice" });
+  }
+};
+
+export const getStudentDetail = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // 1. Fetch Basic Student Profile
+    const student = await Student.findById(id).select('-password');
+    if (!student) {
+      return res.status(404).json({ message: "Student not found" });
+    }
+
+    // 2. CALCULATE STATS (Adapted from your App Logic)
+    // We look for submissions where student matches the requested ID
+    const submissions = await Submission.find({ 
+      student: id, 
+      status: 'Graded' 
+    })
+    .populate('assignment', 'title subject')
+    .populate('quiz', 'title');
+
+    let subjectPerformance = [];
+    let overallAvg = 0;
+
+    if (submissions.length > 0) {
+      let totalObtained = 0;
+      let totalPossible = 0;
+      const subjectMap = {}; 
+  
+      submissions.forEach(sub => {
+        const obtained = sub.obtainedMarks || 0;
+        const total = sub.totalMarks || 100;
+        
+        // Determine Subject
+        let subject = "General";
+        if (sub.assignment && sub.assignment.subject) {
+          subject = sub.assignment.subject;
+        } else if (sub.type === 'quiz') {
+          subject = "Quiz"; 
+        }
+
+        // Aggregate
+        totalObtained += obtained;
+        totalPossible += total;
+  
+        if (!subjectMap[subject]) subjectMap[subject] = { obtained: 0, total: 0 };
+        subjectMap[subject].obtained += obtained;
+        subjectMap[subject].total += total;
+      });
+  
+      // Format Subject Data
+      subjectPerformance = Object.keys(subjectMap).map(subj => {
+        const data = subjectMap[subj];
+        const percent = data.total > 0 ? Math.round((data.obtained / data.total) * 100) : 0;
+        return { subject: subj, score: percent };
+      });
+  
+      overallAvg = totalPossible > 0 ? Math.round((totalObtained / totalPossible) * 100) : 0;
+    }
+
+    // 3. Return Combined Data
+    res.status(200).json({
+      student: {
+        _id: student._id,
+        name: student.name,
+        rollNo: student.rollNo,
+        className: student.className,
+        mobile: student.mobile,
+      },
+      stats: {
+        overall: overallAvg + "%",
+        subjectPerformance // Array: [{ subject: 'Math', score: 85 }, ...]
+      }
+    });
+
+  } catch (error) {
+    console.error("Detail Error:", error);
+    res.status(500).json({ message: "Server error fetching student details" });
+  }
+};
+
+// --- UPDATE STUDENT PROFILE (For the Edit Button) ---
+export const updateStudentProfile = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, mobile, className } = req.body;
+    
+    const updated = await Student.findByIdAndUpdate(
+      id, 
+      { name, mobile, className },
+      { new: true }
+    );
+    
+    res.status(200).json({ message: "Profile updated", student: updated });
+  } catch (error) {
+    res.status(500).json({ message: "Update failed", error: error.message });
+  }
+};
+
+export const getTeacherDetail = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const teacher = await Teacher.findById(id).select('-password');
+    if (!teacher) return res.status(404).json({ message: "Teacher not found" });
+    res.status(200).json(teacher);
+  } catch (error) {
+    res.status(500).json({ message: "Error fetching teacher", error: error.message });
+  }
+};
+
+// --- UPDATE TEACHER PROFILE ---
+export const updateTeacherProfile = async (req, res) => {
+  try {
+    const { id } = req.params;
+    // Updates Name, Mobile, Class Teachership, and Assignments
+    const { name, mobile, classTeachership, assignments } = req.body;
+    
+    const updated = await Teacher.findByIdAndUpdate(
+      id, 
+      { name, mobile, classTeachership, assignments },
+      { new: true }
+    );
+    
+    res.status(200).json({ message: "Teacher updated", teacher: updated });
+  } catch (error) {
+    res.status(500).json({ message: "Update failed", error: error.message });
   }
 };
