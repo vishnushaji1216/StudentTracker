@@ -37,6 +37,8 @@ export default function AdminDashScreen({ navigation }) {
   const slideAnim = useRef(new Animated.Value(-SIDEBAR_WIDTH)).current;
   const overlayAnim = useRef(new Animated.Value(0)).current;
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [displayDate, setDisplayDate] = useState("");
+  
 
   // Dashboard State
   const [showFinance, setShowFinance] = useState(false);
@@ -62,6 +64,12 @@ export default function AdminDashScreen({ navigation }) {
     ]).start();
     setIsSidebarOpen(!isOpen);
   };
+
+  useEffect(() => {
+    const date = new Date();
+    const options = { weekday: 'long', day: 'numeric', month: 'short' };
+    setDisplayDate(date.toLocaleDateString('en-GB', options));
+  }, []);
 
   const handleLogout = async () => {
     await AsyncStorage.multiRemove(["token", "user", "role"]);
@@ -115,8 +123,8 @@ export default function AdminDashScreen({ navigation }) {
         {/* Header */}
         <View style={styles.header}>
           <View>
-            <Text style={styles.headerTitle}>Admin Console</Text>
-            <Text style={styles.headerSub}>{MOCK_DATA.date}</Text>
+            <Text style={styles.headerTitle}>Dashboard</Text>
+            <Text style={styles.headerSub}>{displayDate}</Text>
           </View>
           <TouchableOpacity onPress={toggleSidebar} style={styles.profileBtn}>
             <FontAwesome5 name="bars" size={20} color="#1e293b" />
@@ -178,13 +186,19 @@ export default function AdminDashScreen({ navigation }) {
               <Text style={styles.alertDesc}>Locked Users</Text>
             </TouchableOpacity>
 
-            {/* Pending Approvals Card */}
-            <TouchableOpacity style={[styles.alertCard, styles.alertCardBlue]}>
+            {/* Audio Submission Defaulters Card */}
+            <TouchableOpacity 
+              style={[styles.alertCard, styles.alertCardBlue]}
+              onPress={() => alert("Opening Defaulter List")}
+            >
               <View style={[styles.alertIconBox, styles.iconBoxBlue]}>
-                <FontAwesome5 name="user-clock" size={14} color="#2563eb" />
+                <FontAwesome5 name="microphone-slash" size={14} color="#2563eb" />
               </View>
-              <Text style={[styles.alertVal, styles.textBlue]}>{MOCK_DATA.alerts.pendingApprovals}</Text>
-              <Text style={[styles.alertDesc, styles.textBlue]}>Pending Reg</Text>
+              <Text style={[styles.alertVal, styles.textBlue]}>
+                {/* This value can later be linked to an API for pending submissions */}
+                8 
+              </Text>
+              <Text style={[styles.alertDesc, styles.textBlue]}>Audio Defaulters</Text>
             </TouchableOpacity>
           </View>
 

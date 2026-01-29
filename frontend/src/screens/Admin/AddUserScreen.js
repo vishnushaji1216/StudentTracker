@@ -12,7 +12,8 @@ import {
   BackHandler,
   Dimensions,
   KeyboardAvoidingView,
-  Alert
+  Modal,
+  ActivityIndicator
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import FontAwesome5 from "react-native-vector-icons/FontAwesome5";
@@ -22,20 +23,30 @@ import api from "../../services/api";
 const { width } = Dimensions.get('window');
 const SIDEBAR_WIDTH = 280;
 
+const CLASS_LIST = [
+  "Nursery", "KG1", "KG2", 
+  "1-A", "1-B", "2-A", "2-B", "3-A", "3-B", 
+  "4-A", "4-B", "5-A", "5-B", "6-A", "6-B", 
+  "7-A", "7-B", "8-A", "8-B", "9-A", "9-B", "10-A", "10-B"
+];
+
 export default function AddUserScreen({ navigation }) {
   const [activeRole, setActiveRole] = useState("teacher"); 
+  const [loading, setLoading] = useState(false);
 
   // Sidebar Animations
   const slideAnim = useRef(new Animated.Value(-SIDEBAR_WIDTH)).current;
   const overlayAnim = useRef(new Animated.Value(0)).current;
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
+  // Toast Animation State
+  const toastAnim = useRef(new Animated.Value(100)).current; 
+  const [toast, setToast] = useState({ visible: false, message: '', type: 'success', password: '' });
+
   // Form States - Teacher
   const [teacherName, setTeacherName] = useState("");
   const [teacherMobile, setTeacherMobile] = useState("");
   const [teacherClassTeachership, setTeacherClassTeachership] = useState("");
-  
-  // Teaching Assignment Logic
   const [tempClass, setTempClass] = useState("");
   const [tempSubject, setTempSubject] = useState("");
   const [teachingAssignments, setTeachingAssignments] = useState([]);
@@ -45,103 +56,41 @@ export default function AddUserScreen({ navigation }) {
   const [parentMobile, setParentMobile] = useState("");
   const [studentClass, setStudentClass] = useState("");
   const [studentRoll, setStudentRoll] = useState("");
+  const [grNumber, setGrNumber] = useState("");
+  const [isClassModalVisible, setClassModalVisible] = useState(false);
 
   // Handle Android Back Button
   useEffect(() => {
-    const backHandler = BackHandler.addEventListener(
-      "hardwareBackPress",
-      () => {
-        if (isSidebarOpen) {
-          toggleSidebar();
-          return true;
-        }
-        return false;
-      }
-    );
+    const backHandler = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (isSidebarOpen) { toggleSidebar(); return true; }
+      return false;
+    });
     return () => backHandler.remove();
   }, [isSidebarOpen]);
+
+  // Toast Logic
+  const showToast = (message, type = 'success', password = '') => {
+    setToast({ visible: true, message, type, password });
+    Animated.spring(toastAnim, { toValue: 0, useNativeDriver: true, tension: 50, friction: 8 }).start();
+
+    const duration = password ? 6000 : 2500;
+    setTimeout(() => {
+      Animated.timing(toastAnim, { toValue: 100, duration: 300, useNativeDriver: true }).start(() => {
+        setToast(prev => ({ ...prev, visible: false }));
+      });
+    }, duration);
+  };
 
   const toggleSidebar = () => {
     const isOpen = isSidebarOpen;
     Animated.parallel([
-      Animated.timing(slideAnim, {
-        toValue: isOpen ? -SIDEBAR_WIDTH : 0,
-        duration: 300,
-        useNativeDriver: true,
-      }),
-      Animated.timing(overlayAnim, {
-        toValue: isOpen ? 0 : 0.5,
-        duration: 300,
-        useNativeDriver: true,
-      }),
+      Animated.timing(slideAnim, { toValue: isOpen ? -SIDEBAR_WIDTH : 0, duration: 300, useNativeDriver: true }),
+      Animated.timing(overlayAnim, { toValue: isOpen ? 0 : 0.5, duration: 300, useNativeDriver: true }),
     ]).start();
     setIsSidebarOpen(!isOpen);
   };
 
-  // Logic to add a linked assignment (Class + Subject)
-  const addAssignment = () => {
-    if (tempClass.trim() && tempSubject.trim()) {
-      setTeachingAssignments([...teachingAssignments, { 
-        class: tempClass.trim(), 
-        subject: tempSubject.trim() 
-      }]);
-      setTempClass("");
-      setTempSubject("");
-    }
-  };
-
-  const removeAssignment = (index) => {
-    setTeachingAssignments(teachingAssignments.filter((_, i) => i !== index));
-  };
-
-  // API Integration Logic
-  const handleOnboard = async () => {
-    // Basic Validation
-    if (activeRole === 'teacher' && (!teacherName || !teacherMobile)) {
-      return Alert.alert("Error", "Name and Mobile are required");
-    }
-    if (activeRole === 'student' && (!studentName || !parentMobile || !studentRoll || !studentClass)) {
-      return Alert.alert("Error", "All student fields are required");
-    }
-
-    try {
-      const payload = activeRole === 'teacher' ? {
-        role: 'teacher',
-        name: teacherName,
-        mobile: teacherMobile,
-        classTeachership: teacherClassTeachership,
-        assignments: teachingAssignments,
-      } : {
-        role: 'student',
-        name: studentName,
-        mobile: parentMobile,
-        className: studentClass,
-        rollNo: studentRoll,
-      };
-
-      const response = await api.post('/admin/onboard', payload);
-
-      // Show success with the generated password
-      Alert.alert(
-        "Success",
-        `User registered successfully!\n\nDefault Password: ${response.data.generatedPassword}`,
-        [{ 
-          text: "OK", 
-          onPress: () => {
-            // Clear forms after success
-            if (activeRole === 'teacher') {
-               setTeacherName(""); setTeacherMobile(""); setTeacherClassTeachership(""); setTeachingAssignments([]);
-            } else {
-               setStudentName(""); setParentMobile(""); setStudentClass(""); setStudentRoll("");
-            }
-          }
-        }]
-      );
-    } catch (error) {
-      Alert.alert("Error", error.response?.data?.message || "Failed to connect to server");
-    }
-  };
-
+  // ADDED: Missing Logout Logic
   const handleLogout = async () => {
     try {
       await AsyncStorage.multiRemove(["token", "user", "role"]);
@@ -151,38 +100,81 @@ export default function AddUserScreen({ navigation }) {
     }
   };
 
+  const addAssignment = () => {
+    if (tempClass.trim() && tempSubject.trim()) {
+      setTeachingAssignments([...teachingAssignments, { class: tempClass.trim(), subject: tempSubject.trim() }]);
+      setTempClass(""); setTempSubject("");
+    }
+  };
+
+  const removeAssignment = (index) => {
+    setTeachingAssignments(teachingAssignments.filter((_, i) => i !== index));
+  };
+
+  const handleOnboard = async () => {
+    if (activeRole === 'teacher') {
+      if (!teacherName) return showToast("Please enter Teacher Name", "error");
+      if (!teacherMobile) return showToast("Please enter Mobile Number", "error");
+      if (teacherMobile.length !== 10) return showToast("Mobile must be 10 digits", "error");
+    } else {
+      if (!studentName) return showToast("Please enter Student Name", "error");
+      if (!parentMobile) return showToast("Please enter Parent Mobile", "error");
+      if (parentMobile.length !== 10) return showToast("Mobile must be 10 digits", "error");
+      if (!grNumber) return showToast("Please enter GR Number", "error");
+      if (!studentClass) return showToast("Please select a Class", "error");
+      if (!studentRoll) return showToast("Please enter Roll Number", "error");
+    }
+
+    setLoading(true);
+    try {
+      const payload = activeRole === 'teacher' ? {
+        role: 'teacher', name: teacherName, mobile: teacherMobile,
+        classTeachership: teacherClassTeachership, assignments: teachingAssignments,
+      } : {
+        role: 'student', name: studentName, mobile: parentMobile,
+        className: studentClass, rollNo: studentRoll, grNumber: grNumber,
+      };
+
+      const response = await api.post('/admin/onboard', payload);
+      
+      showToast(
+        `${activeRole.charAt(0).toUpperCase() + activeRole.slice(1)} registered successfully!`,
+        'success',
+        response.data.generatedPassword
+      );
+
+      if (activeRole === 'teacher') {
+        setTeacherName(""); setTeacherMobile(""); setTeacherClassTeachership(""); setTeachingAssignments([]);
+      } else {
+        setStudentName(""); setParentMobile(""); setStudentClass(""); setStudentRoll(""); setGrNumber("");
+      }
+    } catch (error) {
+      showToast(error.response?.data?.message || "Connection failed", "error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#fff" />
       
-      {/* --- SIDEBAR OVERLAY --- */}
-      <Animated.View
-        style={[styles.overlay, { opacity: overlayAnim }]}
-        pointerEvents={isSidebarOpen ? "auto" : "none"}
-      >
+      {/* SIDEBAR OVERLAY */}
+      <Animated.View style={[styles.overlay, { opacity: overlayAnim }]} pointerEvents={isSidebarOpen ? "auto" : "none"}>
         <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={toggleSidebar} />
       </Animated.View>
 
-      {/* --- SIDEBAR DRAWER --- */}
-      <Animated.View
-        style={[
-          styles.sidebar,
-          { transform: [{ translateX: slideAnim }] },
-        ]}
-      >
+      {/* SIDEBAR DRAWER */}
+      <Animated.View style={[styles.sidebar, { transform: [{ translateX: slideAnim }] }]}>
         <View style={styles.sidebarContainer}>
           <View>
             <View style={styles.sidebarHeader}>
-              <View style={styles.logoBox}>
-                <Text style={styles.logoText}>S</Text>
-              </View>
+              <View style={styles.logoBox}><Text style={styles.logoText}>S</Text></View>
               <View>
                 <Text style={styles.sidebarTitle}>Stella Admin</Text>
                 <Text style={styles.sidebarVersion}>v5.0.0</Text>
               </View>
             </View>
-
-            {/* Sidebar Menu */}
             <View style={styles.menuSection}>
               <SidebarItem icon="chart-pie" label="Dashboard" onPress={() => { toggleSidebar(); navigation.navigate('AdminDash');}} />
               <SidebarItem icon="user-plus" label="Add User" active />
@@ -193,13 +185,13 @@ export default function AddUserScreen({ navigation }) {
               <SidebarItem icon="shield-alt" label="Security" onPress={() => {toggleSidebar(); navigation.navigate('AdminSetting');}}/>
             </View>
           </View>
-
           <View style={styles.sidebarFooter}>
             <View style={styles.footerRow}>
               <TouchableOpacity style={styles.settingsBtn} onPress={() => {toggleSidebar(); navigation.navigate('AdminSetting');}}>
                 <FontAwesome5 name="cog" size={16} color="#64748b" />
                 <Text style={styles.settingsText}>Settings</Text>
               </TouchableOpacity>
+              {/* handleLogout reference here */}
               <TouchableOpacity style={styles.logoutIconBtn} onPress={handleLogout}>
                 <FontAwesome5 name="sign-out-alt" size={16} color="#ef4444" />
               </TouchableOpacity>
@@ -208,10 +200,7 @@ export default function AddUserScreen({ navigation }) {
         </View>
       </Animated.View>
 
-      {/* --- MAIN CONTENT --- */}
       <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
-        
-        {/* Header */}
         <View style={styles.header}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 15 }}>
             <TouchableOpacity onPress={toggleSidebar} style={styles.menuButton}>
@@ -219,218 +208,144 @@ export default function AddUserScreen({ navigation }) {
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Onboard Users</Text>
           </View>
-          <TouchableOpacity>
-            <FontAwesome5 name="ellipsis-v" size={18} color="#64748b" />
-          </TouchableOpacity>
         </View>
 
-        <KeyboardAvoidingView 
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
-          style={{ flex: 1 }}
-        >
-          <ScrollView 
-            style={styles.scrollContent} 
-            contentContainerStyle={{ paddingBottom: 120 }}
-            showsVerticalScrollIndicator={false}
-          >
+        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1 }}>
+          <ScrollView style={styles.scrollContent} contentContainerStyle={{ paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
             <View style={styles.contentPadding}>
               
-              {/* Role Toggle Tabs */}
               <View style={styles.toggleContainer}>
-                <TouchableOpacity 
-                  style={[styles.toggleBtn, activeRole === 'teacher' && styles.toggleBtnActive]}
-                  onPress={() => setActiveRole('teacher')}
-                >
+                <TouchableOpacity style={[styles.toggleBtn, activeRole === 'teacher' && styles.toggleBtnActive]} onPress={() => setActiveRole('teacher')}>
                   <Text style={[styles.toggleText, activeRole === 'teacher' && styles.toggleTextActive]}>Teacher</Text>
                 </TouchableOpacity>
-                <TouchableOpacity 
-                  style={[styles.toggleBtn, activeRole === 'student' && styles.toggleBtnActive]}
-                  onPress={() => setActiveRole('student')}
-                >
+                <TouchableOpacity style={[styles.toggleBtn, activeRole === 'student' && styles.toggleBtnActive]} onPress={() => setActiveRole('student')}>
                   <Text style={[styles.toggleText, activeRole === 'student' && styles.toggleTextActive]}>Student</Text>
                 </TouchableOpacity>
               </View>
 
-              {/* ================= TEACHER FORM ================= */}
-              {activeRole === 'teacher' && (
+              {activeRole === 'teacher' ? (
                 <View style={styles.formSection}>
-                  <View style={styles.imageUploadRow}>
-                    <TouchableOpacity style={styles.imageUploadCircle}>
-                      <FontAwesome5 name="camera" size={24} color="#94a3b8" />
-                      <Text style={styles.imageUploadText}>ADD PHOTO</Text>
-                    </TouchableOpacity>
-                  </View>
-
                   <View style={styles.inputGroup}>
                     <Text style={styles.label}>FULL NAME</Text>
-                    <TextInput 
-                      style={styles.input} 
-                      placeholder="e.g. Priya Sharma" 
-                      placeholderTextColor="#cbd5e1"
-                      value={teacherName}
-                      onChangeText={setTeacherName}
-                    />
+                    <TextInput style={styles.input} placeholder="e.g. Priya Sharma" placeholderTextColor="#cbd5e1" value={teacherName} onChangeText={setTeacherName} />
                   </View>
-
                   <View style={styles.inputGroup}>
                     <Text style={styles.label}>MOBILE NUMBER</Text>
-                    <TextInput 
-                      style={styles.input} 
-                      placeholder="9876543210" 
-                      placeholderTextColor="#cbd5e1"
-                      keyboardType="phone-pad"
-                      value={teacherMobile}
-                      onChangeText={setTeacherMobile}
-                    />
+                    <TextInput style={styles.input} placeholder="9876543210" placeholderTextColor="#cbd5e1" keyboardType="phone-pad" value={teacherMobile} onChangeText={setTeacherMobile} />
                   </View>
-
-                  {/* Class Teachership */}
                   <View style={styles.cardInput}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-                      <FontAwesome5 name="star" size={10} color="#818cf8" />
-                      <Text style={[styles.label, { marginBottom: 0, color: '#818cf8' }]}>CLASS TEACHERSHIP</Text>
-                    </View>
-                    <TextInput 
-                      style={[styles.input, { backgroundColor: '#fff', color: '#4f46e5' }]} 
-                      placeholder="Type Main Class (e.g. 10-A)" 
-                      placeholderTextColor="#a5b4fc"
-                      value={teacherClassTeachership}
-                      onChangeText={setTeacherClassTeachership}
-                    />
-                    <Text style={styles.helperText}>This class will appear on their main dashboard.</Text>
+                    <Text style={[styles.label, { color: '#818cf8' }]}>CLASS TEACHERSHIP</Text>
+                    <TextInput style={[styles.input, { backgroundColor: '#fff', color: '#4f46e5' }]} placeholder="Main Class (e.g. 10-A)" placeholderTextColor="#a5b4fc" value={teacherClassTeachership} onChangeText={setTeacherClassTeachership} />
                   </View>
-
-                  {/* Teaching Assignments */}
                   <View style={styles.inputGroup}>
                     <Text style={styles.label}>TEACHING ASSIGNMENTS</Text>
                     <View style={styles.assignmentEntryRow}>
-                      <TextInput 
-                        style={[styles.input, { flex: 1.5, fontSize: 12 }]} 
-                        placeholder="Class (9-A)" 
-                        placeholderTextColor="#cbd5e1"
-                        value={tempClass}
-                        onChangeText={setTempClass}
-                      />
-                      <TextInput 
-                        style={[styles.input, { flex: 1.5, fontSize: 12 }]} 
-                        placeholder="Subject (Math)" 
-                        placeholderTextColor="#cbd5e1"
-                        value={tempSubject}
-                        onChangeText={setTempSubject}
-                      />
-                      <TouchableOpacity style={styles.addBtn} onPress={addAssignment}>
-                        <Text style={styles.addBtnText}>ADD</Text>
-                      </TouchableOpacity>
+                      <TextInput style={[styles.input, { flex: 1.5 }]} placeholder="9-A" placeholderTextColor="#cbd5e1" value={tempClass} onChangeText={setTempClass} />
+                      <TextInput style={[styles.input, { flex: 1.5 }]} placeholder="Math" placeholderTextColor="#cbd5e1" value={tempSubject} onChangeText={setTempSubject} />
+                      <TouchableOpacity style={styles.addBtn} onPress={addAssignment}><Text style={styles.addBtnText}>ADD</Text></TouchableOpacity>
                     </View>
-
                     <View style={styles.tagContainer}>
                       {teachingAssignments.map((item, index) => (
                         <View key={index} style={styles.tag}>
                           <Text style={styles.tagText}>{item.class}: {item.subject}</Text>
-                          <TouchableOpacity onPress={() => removeAssignment(index)}>
-                            <FontAwesome5 name="times" size={10} color="#ef4444" />
-                          </TouchableOpacity>
+                          <TouchableOpacity onPress={() => removeAssignment(index)}><FontAwesome5 name="times" size={10} color="#ef4444" /></TouchableOpacity>
                         </View>
                       ))}
                     </View>
                   </View>
-
-                  {/* Teacher Code (Read-Only) */}
-                  <View style={styles.row}>
-                    <View style={[styles.inputGroup, { flex: 1 }]}>
-                      <Text style={styles.label}>TEACHER CODE</Text>
-                      <View style={styles.readOnlyInput}>
-                        <Text style={styles.readOnlyText}>AUTO-GENERATED</Text>
-                        <FontAwesome5 name="magic" size={10} color="#94a3b8" />
-                      </View>
-                    </View>
-                  </View>
-
-                  <TouchableOpacity style={styles.primaryBtn} onPress={handleOnboard}>
-                    <Text style={styles.primaryBtnText}>Create Teacher</Text>
+                  <TouchableOpacity style={styles.primaryBtn} onPress={handleOnboard} disabled={loading}>
+                    {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryBtnText}>Create Teacher</Text>}
                   </TouchableOpacity>
                 </View>
-              )}
-
-              {/* ================= STUDENT FORM ================= */}
-              {activeRole === 'student' && (
+              ) : (
                 <View style={styles.formSection}>
                   <View style={styles.inputGroup}>
                     <Text style={styles.label}>STUDENT NAME</Text>
-                    <TextInput 
-                      style={styles.input} 
-                      placeholder="e.g. Rahul Kumar" 
-                      placeholderTextColor="#cbd5e1"
-                      value={studentName}
-                      onChangeText={setStudentName}
-                    />
+                    <TextInput style={styles.input} placeholder="e.g. Rahul Kumar" placeholderTextColor="#cbd5e1" value={studentName} onChangeText={setStudentName} />
                   </View>
-
                   <View style={styles.inputGroup}>
-                    <Text style={styles.label}>PARENT MOBILE NUMBER</Text>
+                    <Text style={styles.label}>PARENT MOBILE</Text>
                     <View style={styles.iconInputContainer}>
-                      <FontAwesome5 name="phone-alt" size={14} color="#94a3b8" style={{ marginLeft: 12 }} />
-                      <TextInput 
-                        style={styles.iconInput} 
-                        placeholder="9876543210" 
-                        placeholderTextColor="#cbd5e1"
-                        keyboardType="phone-pad"
-                        value={parentMobile}
-                        onChangeText={setParentMobile}
-                      />
+                      <FontAwesome5 name="phone-alt" size={12} color="#94a3b8" style={{ marginLeft: 12 }} />
+                      <TextInput style={styles.iconInput} placeholder="9876543210" placeholderTextColor="#cbd5e1" keyboardType="phone-pad" value={parentMobile} onChangeText={setParentMobile} />
                     </View>
                   </View>
-
-                  {/* Assign Class & Roll No */}
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.label}>GR NUMBER</Text>
+                    <View style={styles.iconInputContainer}>
+                      <FontAwesome5 name="hashtag" size={12} color="#94a3b8" style={{ marginLeft: 12 }} />
+                      <TextInput style={styles.iconInput} placeholder="GR-9088" placeholderTextColor="#cbd5e1" value={grNumber} onChangeText={setGrNumber} />
+                    </View>
+                  </View>
                   <View style={styles.row}>
-                    <View style={[styles.inputGroup, { flex: 2 }]}>
+                    <View style={{ flex: 2 }}>
                       <Text style={styles.label}>ASSIGN CLASS</Text>
-                      <TextInput 
-                        style={styles.input} 
-                        placeholder="e.g. 9-A" 
-                        placeholderTextColor="#cbd5e1"
-                        value={studentClass}
-                        onChangeText={setStudentClass}
-                      />
+                      <TouchableOpacity style={styles.dropdownTrigger} onPress={() => setClassModalVisible(true)}>
+                        <Text style={[styles.dropdownTriggerText, !studentClass && { color: '#cbd5e1' }]}>{studentClass || "Select"}</Text>
+                        <FontAwesome5 name="chevron-down" size={10} color="#94a3b8" />
+                      </TouchableOpacity>
                     </View>
-                    <View style={[styles.inputGroup, { flex: 1 }]}>
+                    <View style={{ flex: 1 }}>
                       <Text style={styles.label}>ROLL NO.</Text>
-                      <TextInput 
-                        style={styles.input} 
-                        placeholder="01" 
-                        placeholderTextColor="#cbd5e1"
-                        keyboardType="numeric"
-                        value={studentRoll}
-                        onChangeText={setStudentRoll}
-                      />
+                      <TextInput style={styles.input} placeholder="01" placeholderTextColor="#cbd5e1" keyboardType="numeric" value={studentRoll} onChangeText={setStudentRoll} />
                     </View>
                   </View>
-
-                  <View style={styles.credentialsBox}>
-                    <Text style={[styles.label, { marginBottom: 12 }]}>LOGIN SETUP</Text>
-                    <View style={styles.credentialRow}>
-                      <View style={styles.credentialIconBox}><FontAwesome5 name="id-card" size={14} color="#94a3b8" /></View>
-                      <View>
-                        <Text style={styles.credentialLabel}>LOGIN ID</Text>
-                        <Text style={styles.credentialValue}>Mobile Number</Text>
-                      </View>
-                    </View>
-                    <View style={{ marginTop: 12 }}>
-                       <Text style={styles.helperText}>Password will be generated as: FIRST 4 LETTERS + LAST 2 DIGITS OF MOBILE</Text>
-                    </View>
-                  </View>
-
-                  <TouchableOpacity style={styles.primaryBtn} onPress={handleOnboard}>
-                    <Text style={styles.primaryBtnText}>Add Student</Text>
+                  <TouchableOpacity style={styles.primaryBtn} onPress={handleOnboard} disabled={loading}>
+                    {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryBtnText}>Add Student</Text>}
                   </TouchableOpacity>
                 </View>
               )}
-
             </View>
           </ScrollView>
         </KeyboardAvoidingView>
 
-        {/* BOTTOM NAVIGATION */}
+        {/* TOAST NOTIFICATION */}
+        {toast.visible && (
+          <Animated.View style={[
+            styles.toastContainer, 
+            { transform: [{ translateY: toastAnim }], backgroundColor: toast.type === 'error' ? '#fee2e2' : '#ecfdf5' }
+          ]}>
+            <View style={styles.toastContent}>
+              <FontAwesome5 
+                name={toast.type === 'error' ? 'exclamation-circle' : 'check-circle'} 
+                size={18} 
+                color={toast.type === 'error' ? '#ef4444' : '#10b981'} 
+              />
+              <View style={{ marginLeft: 12, flex: 1 }}>
+                <Text style={[styles.toastMessage, { color: toast.type === 'error' ? '#b91c1c' : '#065f46' }]}>
+                  {toast.message}
+                </Text>
+                {toast.password && (
+                  <Text style={styles.toastPassword}>Default Password: <Text style={{ fontWeight: 'bold' }}>{toast.password}</Text></Text>
+                )}
+              </View>
+            </View>
+          </Animated.View>
+        )}
+
+        {/* CLASS MODAL */}
+        <Modal visible={isClassModalVisible} transparent animationType="slide">
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Select Class</Text>
+                <TouchableOpacity onPress={() => setClassModalVisible(false)}>
+                  <FontAwesome5 name="times" size={20} color="#64748b" />
+                </TouchableOpacity>
+              </View>
+              <ScrollView>
+                {CLASS_LIST.map((item) => (
+                  <TouchableOpacity key={item} style={styles.modalItem} onPress={() => { setStudentClass(item); setClassModalVisible(false); }}>
+                    <Text style={[styles.modalItemText, studentClass === item && { color: '#4f46e5', fontWeight: 'bold' }]}>{item}</Text>
+                    {studentClass === item && <FontAwesome5 name="check" size={14} color="#4f46e5" />}
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
+
+        {/* BOTTOM NAV */}
         <View style={styles.bottomNav}>
           <TouchableOpacity style={styles.navItem} onPress={() => navigation?.navigate('AdminDash')}>
             <FontAwesome5 name="chart-pie" size={20} color="#94a3b8" />
@@ -441,26 +356,15 @@ export default function AddUserScreen({ navigation }) {
             <Text style={[styles.navLabel, { color: '#4f46e5' }]}>Add User</Text>
           </TouchableOpacity>
         </View>
-
       </SafeAreaView>
     </View>
   );
 }
 
 const SidebarItem = ({ icon, label, active, onPress }) => (
-  <TouchableOpacity 
-    style={[styles.sidebarItem, active && styles.sidebarItemActive]}
-    onPress={onPress}
-  >
-    <FontAwesome5 
-      name={icon} 
-      size={16} 
-      color={active ? "#4f46e5" : "#64748b"} 
-      style={{ width: 24 }} 
-    />
-    <Text style={[styles.sidebarItemText, active && { color: "#4f46e5", fontWeight: '700' }]}>
-      {label}
-    </Text>
+  <TouchableOpacity style={[styles.sidebarItem, active && styles.sidebarItemActive]} onPress={onPress}>
+    <FontAwesome5 name={icon} size={16} color={active ? "#4f46e5" : "#64748b"} style={{ width: 24 }} />
+    <Text style={[styles.sidebarItemText, active && { color: "#4f46e5", fontWeight: '700' }]}>{label}</Text>
   </TouchableOpacity>
 );
 
@@ -499,10 +403,6 @@ const styles = StyleSheet.create({
   input: { backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 12, padding: 12, fontSize: 14, color: '#1e293b', fontWeight: '600' },
   inputGroup: { marginBottom: 4 },
   row: { flexDirection: 'row', gap: 12 },
-  helperText: { fontSize: 10, color: '#94a3b8', marginTop: 4, marginLeft: 4 },
-  imageUploadRow: { alignItems: 'center', marginBottom: 8 },
-  imageUploadCircle: { width: 96, height: 96, borderRadius: 48, backgroundColor: '#f8fafc', borderStyle: 'dashed', borderWidth: 2, borderColor: '#cbd5e1', justifyContent: 'center', alignItems: 'center' },
-  imageUploadText: { fontSize: 9, fontWeight: 'bold', color: '#94a3b8', marginTop: 4 },
   cardInput: { backgroundColor: '#eef2ff', padding: 16, borderRadius: 12, borderWidth: 1, borderColor: '#e0e7ff' },
   assignmentEntryRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
   addBtn: { backgroundColor: '#4f46e5', paddingHorizontal: 16, borderRadius: 12, justifyContent: 'center' },
@@ -510,19 +410,23 @@ const styles = StyleSheet.create({
   tagContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   tag: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#eff6ff', borderColor: '#dbeafe', borderWidth: 1, paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8, gap: 8 },
   tagText: { fontSize: 11, fontWeight: 'bold', color: '#1d4ed8' },
-  readOnlyInput: { backgroundColor: '#f1f5f9', borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 12, padding: 12, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  readOnlyText: { fontSize: 12, fontWeight: 'bold', fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace', color: '#475569' },
   iconInputContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 12 },
-  iconInputContainerWhite: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 12 },
   iconInput: { flex: 1, padding: 12, fontSize: 14, fontWeight: '600', color: '#1e293b' },
-  credentialsBox: { backgroundColor: '#f8fafc', padding: 16, borderRadius: 16, borderWidth: 1, borderColor: '#f1f5f9' },
-  credentialRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 8 },
-  credentialIconBox: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#fff', borderWidth: 1, borderColor: '#e2e8f0', justifyContent: 'center', alignItems: 'center' },
-  credentialLabel: { fontSize: 10, fontWeight: 'bold', color: '#64748b' },
-  credentialValue: { fontSize: 12, fontWeight: 'bold', color: '#1e293b' },
+  dropdownTrigger: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 12, padding: 12, height: 48 },
+  dropdownTriggerText: { fontSize: 14, fontWeight: '600', color: '#1e293b' },
   primaryBtn: { backgroundColor: '#4f46e5', paddingVertical: 16, borderRadius: 12, alignItems: 'center', elevation: 4, marginTop: 8 },
   primaryBtnText: { color: '#fff', fontSize: 14, fontWeight: 'bold' },
   bottomNav: { flexDirection: 'row', backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#e2e8f0', paddingVertical: 10, paddingBottom: Platform.OS === 'ios' ? 25 : 10, justifyContent: 'space-around', alignItems: 'center', elevation: 10 },
   navItem: { alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20 },
   navLabel: { fontSize: 10, fontWeight: '600', color: '#94a3b8', marginTop: 4 },
+  toastContainer: { position: 'absolute', bottom: 90, left: 20, right: 20, padding: 16, borderRadius: 16, elevation: 10, zIndex: 1000, borderWidth: 1, borderColor: 'rgba(0,0,0,0.05)' },
+  toastContent: { flexDirection: 'row', alignItems: 'center' },
+  toastMessage: { fontSize: 14, fontWeight: 'bold' },
+  toastPassword: { fontSize: 12, marginTop: 2, color: '#065f46' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  modalContent: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, maxHeight: '80%' },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
+  modalTitle: { fontSize: 18, fontWeight: 'bold', color: '#1e293b' },
+  modalItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#f8fafc' },
+  modalItemText: { fontSize: 16, color: '#475569' },
 });

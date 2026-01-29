@@ -140,7 +140,7 @@ export default function StudentRegistryScreen({ navigation }) {
             </View>
           </View>
 
-          <View style={styles.performanceBox}>
+          {/* <View style={styles.performanceBox}>
             <Text style={styles.perfLabel}>PERFORMANCE</Text>
             <View style={styles.perfRow}>
               <Text style={[
@@ -162,7 +162,7 @@ export default function StudentRegistryScreen({ navigation }) {
                 </Text>
               </View>
             </View>
-          </View>
+          </View> */}
         </View>
 
         <View style={styles.cardFooter}>

@@ -2,6 +2,9 @@ import Teacher from "../models/teacher.model.js";
 import Student from "../models/student.model.js";
 import Announcement from "../models/announcement.model.js";
 import Submission from "../models/submission.model.js";
+import Syllabus from "../models/syllabus.model.js";
+import Assignment from "../models/assignment.model.js"
+import Fee from "../models/fee.model.js";
 import bcrypt from "bcryptjs";
 
 // Helper function to generate the password
@@ -17,18 +20,21 @@ const generateDefaultPassword = (name, mobile) => {
 
 export const onboardUser = async (req, res) => {
   try {
-    const { role, name, mobile, className, rollNo, assignments, classTeachership } = req.body;
+    const { role, name, mobile, className, grNumber, rollNo, assignments, classTeachership } = req.body;
 
     // 1. Validation: Check if user exists
+    // Included grNumber in the $or check for students as it must be unique
     const existingUser = role === "teacher" 
       ? await Teacher.findOne({ mobile }) 
-      : await Student.findOne({ $or: [{ rollNo }, { mobile }] });
+      : await Student.findOne({ $or: [{ rollNo, className }, { mobile }, { grNumber }] });
 
     if (existingUser) {
-      return res.status(400).json({ message: "User with this Mobile or Roll No already exists" });
+      return res.status(400).json({ 
+        message: "User with this Mobile, GR Number, or Roll No in this class already exists" 
+      });
     }
 
-    // 2. Generate the password using your logic
+    // 2. Generate the password
     const plainPassword = generateDefaultPassword(name, mobile);
     const hashedPassword = await bcrypt.hash(plainPassword, 10);
 
@@ -39,24 +45,25 @@ export const onboardUser = async (req, res) => {
         name,
         mobile,
         password: hashedPassword,
-        teacherCode: `T-${Date.now().toString().slice(-4)}`, // Auto-generated code
+        teacherCode: `T-${Date.now().toString().slice(-4)}`,
         classTeachership,
         assignments
       });
     } else if (role === "student") {
       newUser = await Student.create({
         name,
-        mobile, // Parent mobile used for login
+        mobile,
         password: hashedPassword,
         rollNo,
-        className
+        className, 
+        grNumber // Included new GR Number field
       });
     }
 
-    // 4. Return success and the generated password so the Admin can tell the user
+    // 4. Return success
     res.status(201).json({
       message: `${role.charAt(0).toUpperCase() + role.slice(1)} registered successfully`,
-      generatedPassword: plainPassword, // Sending back so the Admin can note it down
+      generatedPassword: plainPassword,
       user: {
         id: newUser._id,
         name: newUser.name,
@@ -72,7 +79,7 @@ export const onboardUser = async (req, res) => {
 
 export const onboardBulkUsers = async (req, res) => {
   try {
-    const { users } = req.body; // Expects array: [{ role, name, mobile, className, rollNo }]
+    const { users } = req.body; // Expects array: [{ role, name, mobile, className, rollNo, grNumber }]
 
     if (!users || !Array.isArray(users) || users.length === 0) {
       return res.status(400).json({ message: "No users provided" });
@@ -84,7 +91,11 @@ export const onboardBulkUsers = async (req, res) => {
     // Process loop
     for (const [index, user] of users.entries()) {
       try {
-        // Generate Password
+        // Validation: Ensure grNumber is present for bulk students
+        if (user.role === 'student' && !user.grNumber) {
+          throw new Error("GR Number is required for student registration");
+        }
+
         const plainPassword = generateDefaultPassword(user.name, user.mobile);
         const hashedPassword = await bcrypt.hash(plainPassword, 10);
 
@@ -95,7 +106,8 @@ export const onboardBulkUsers = async (req, res) => {
             password: hashedPassword,
             className: user.className,
             rollNo: user.rollNo,
-            role: 'student' // Explicitly set role
+            grNumber: user.grNumber, // Included in bulk object
+            role: 'student'
           });
         }
       } catch (err) {
@@ -103,22 +115,29 @@ export const onboardBulkUsers = async (req, res) => {
       }
     }
 
-    // Bulk Insert (ordered: false allows valid rows to insert even if some fail)
+    // Bulk Insert
     let insertedCount = 0;
     if (studentsToInsert.length > 0) {
       try {
         const result = await Student.insertMany(studentsToInsert, { ordered: false });
         insertedCount = result.length;
       } catch (e) {
-        // insertMany throws error if ANY doc fails, but keeps successful ones if ordered: false
-        insertedCount = e.insertedDocs.length;
-        // Collect duplicate key errors
-        e.writeErrors.forEach(err => {
-          errors.push({ 
-            msg: `Duplicate detected`, 
-            detail: err.errmsg.includes('rollNo') ? 'Roll No exists' : 'Mobile exists' 
+        insertedCount = e.insertedDocs ? e.insertedDocs.length : 0;
+        
+        // Detailed error reporting for duplicates
+        if (e.writeErrors) {
+          e.writeErrors.forEach(err => {
+            let detail = "Duplicate entry";
+            if (err.errmsg.includes('rollNo')) detail = 'Roll No exists';
+            else if (err.errmsg.includes('mobile')) detail = 'Mobile exists';
+            else if (err.errmsg.includes('grNumber')) detail = 'GR Number exists';
+
+            errors.push({ 
+              msg: `Registration failed`, 
+              detail: detail 
+            });
           });
-        });
+        }
       }
     }
 
@@ -288,81 +307,174 @@ export const deleteNotice = async (req, res) => {
   }
 };
 
+const mapStarsToGrade = (stars) => {
+  if (!stars) return 'B'; // Default if not set
+  if (stars >= 5) return 'A';
+  if (stars >= 4) return 'B';
+  if (stars >= 3) return 'C';
+  if (stars >= 2) return 'D';
+  return 'E';
+};
+
+// --- MERGED & UPDATED CONTROLLER ---
 export const getStudentDetail = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // 1. Fetch Basic Student Profile
-    const student = await Student.findById(id).select('-password');
+    // 1. Fetch Student Identity & Fees
+    // We use .populate('fees') to get the Fee status immediately
+    const student = await Student.findById(id).populate('fees');
+    
     if (!student) {
       return res.status(404).json({ message: "Student not found" });
     }
 
-    // 2. CALCULATE STATS (Adapted from your App Logic)
-    // We look for submissions where student matches the requested ID
-    const submissions = await Submission.find({ 
-      student: id, 
-      status: 'Graded' 
-    })
-    .populate('assignment', 'title subject')
-    .populate('quiz', 'title');
+    // 2. Identify Class Teacher
+    // Find the teacher whose 'classTeachership' matches the student's class
+    const classTeacher = await Teacher.findOne({ classTeachership: student.className })
+      .select('name mobile profilePic');
 
-    let subjectPerformance = [];
-    let overallAvg = 0;
+    // 3. Calculate Academic Stats (Student Avg vs Class Avg)
+    
+    // A. Student's Average
+    const studentSubmissions = await Submission.find({ student: id, status: 'Graded' });
+    let totalObtained = 0;
+    let totalPossible = 0;
+    
+    studentSubmissions.forEach(sub => {
+      totalObtained += sub.obtainedMarks || 0;
+      totalPossible += sub.totalMarks || 100;
+    });
+    
+    const studentAvg = totalPossible > 0 
+      ? Math.round((totalObtained / totalPossible) * 100) 
+      : 0;
 
-    if (submissions.length > 0) {
-      let totalObtained = 0;
-      let totalPossible = 0;
-      const subjectMap = {}; 
-  
-      submissions.forEach(sub => {
-        const obtained = sub.obtainedMarks || 0;
-        const total = sub.totalMarks || 100;
-        
-        // Determine Subject
-        let subject = "General";
-        if (sub.assignment && sub.assignment.subject) {
-          subject = sub.assignment.subject;
-        } else if (sub.type === 'quiz') {
-          subject = "Quiz"; 
+    // B. Class Average (Aggregation)
+    // Aggregates all submissions for ALL students in this class to find a benchmark
+    const classStats = await Student.aggregate([
+      { $match: { className: student.className } },
+      {
+        $lookup: {
+          from: "submissions",
+          localField: "_id",
+          foreignField: "student",
+          as: "grades"
         }
-
-        // Aggregate
-        totalObtained += obtained;
-        totalPossible += total;
-  
-        if (!subjectMap[subject]) subjectMap[subject] = { obtained: 0, total: 0 };
-        subjectMap[subject].obtained += obtained;
-        subjectMap[subject].total += total;
-      });
-  
-      // Format Subject Data
-      subjectPerformance = Object.keys(subjectMap).map(subj => {
-        const data = subjectMap[subj];
-        const percent = data.total > 0 ? Math.round((data.obtained / data.total) * 100) : 0;
-        return { subject: subj, score: percent };
-      });
-  
-      overallAvg = totalPossible > 0 ? Math.round((totalObtained / totalPossible) * 100) : 0;
-    }
-
-    // 3. Return Combined Data
-    res.status(200).json({
-      student: {
-        _id: student._id,
-        name: student.name,
-        rollNo: student.rollNo,
-        className: student.className,
-        mobile: student.mobile,
       },
-      stats: {
-        overall: overallAvg + "%",
-        subjectPerformance // Array: [{ subject: 'Math', score: 85 }, ...]
+      { $unwind: "$grades" },
+      { $match: { "grades.status": "Graded" } },
+      {
+        $group: {
+          _id: null,
+          totalObtained: { $sum: "$grades.obtainedMarks" },
+          totalMarks: { $sum: "$grades.totalMarks" }
+        }
+      },
+      {
+        $project: {
+          classAvg: { 
+            $cond: [
+              { $eq: ["$totalMarks", 0] }, 
+              0, 
+              { $multiply: [{ $divide: ["$totalObtained", "$totalMarks"] }, 100] }
+            ]
+          }
+        }
       }
+    ]);
+
+    const classAvg = classStats.length > 0 ? Math.round(classStats[0].classAvg) : 0;
+
+    // 4. Subject Breakdown (For the UI Accordion)
+    // Fetch Syllabus to determine which subjects the student actually has
+    const syllabusList = await Syllabus.find({ className: student.className }).populate('teacher', 'name');
+
+    // Iterate over subjects to build detailed report cards
+    const subjectData = await Promise.all(syllabusList.map(async (doc) => {
+      const subjectName = doc.subject;
+      
+      // Check Notebook Status (Pending Homeworks)
+      const homeworks = await Assignment.find({ 
+        className: student.className, 
+        subject: subjectName, 
+        type: 'homework'
+      }).select('_id');
+      
+      const pendingCount = await Submission.countDocuments({
+        student: id,
+        assignment: { $in: homeworks.map(h => h._id) },
+        status: { $in: ['Pending', 'Submitted'] } // Submitted but not Graded = Pending Check
+      });
+
+      // Fetch Latest Exam Score
+      const latestExamSub = await Submission.findOne({
+        student: id,
+        status: 'Graded'
+      })
+      .populate({
+        path: 'assignment',
+        match: { subject: subjectName, type: { $in: ['exam', 'quiz'] } }
+      })
+      .sort({ submittedAt: -1 });
+
+      const validExam = latestExamSub?.assignment ? latestExamSub : null;
+
+      return {
+        id: subjectName.toLowerCase(),
+        name: subjectName,
+        teacher: doc.teacher?.name || "Unknown",
+        initials: subjectName.substring(0, 2).toUpperCase(),
+        color: doc.color || '#4f46e5',
+        bgColor: '#eef2ff',
+        
+        // Subject Metrics
+        score: studentAvg, // (Refinement: In V2, calculate subject-specific avg here)
+        avg: classAvg, 
+        
+        chapter: doc.chapters.find(c => c.isCurrent)?.title || "No Active Chapter",
+        notebook: pendingCount === 0 ? "Checked" : "Pending",
+        
+        examName: validExam ? validExam.assignment.title : "No Exams",
+        examScore: validExam ? validExam.obtainedMarks : null,
+        examTotal: validExam ? validExam.totalMarks : null,
+        isExamDone: !!validExam,
+        isWeak: studentAvg < classAvg 
+      };
+    }));
+
+    // 5. Return the Unified Data Structure
+    res.status(200).json({
+      identity: {
+        id: student._id,
+        name: student.name,
+        className: student.className,
+        rollNo: student.rollNo,
+        grNumber: student.grNumber || "N/A",
+        mobile: student.mobile,
+        profilePic: student.profilePic,
+        initials: student.name.split(' ').map(n => n[0]).join('').substring(0,2).toUpperCase()
+      },
+      metrics: {
+        avgScore: studentAvg + "%",
+        writingGrade: mapStarsToGrade(student.stats?.writingStars),
+        feeStatus: (student.fees && student.fees.some(f => f.status === 'Overdue')) ? 'Overdue' : 'Clear'
+      },
+      chart: {
+        studentAvg,
+        classAvg,
+        trend: studentAvg >= classAvg ? 'Performing above average' : 'Needs attention'
+      },
+      classTeacher: classTeacher ? {
+        name: classTeacher.name,
+        mobile: classTeacher.mobile,
+        pic: classTeacher.profilePic
+      } : null,
+      subjects: subjectData
     });
 
   } catch (error) {
-    console.error("Detail Error:", error);
+    console.error("Student Detail Error:", error);
     res.status(500).json({ message: "Server error fetching student details" });
   }
 };
@@ -414,3 +526,4 @@ export const updateTeacherProfile = async (req, res) => {
     res.status(500).json({ message: "Update failed", error: error.message });
   }
 };
+

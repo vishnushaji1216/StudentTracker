@@ -6,6 +6,12 @@ const StudentSchema = new mongoose.Schema({
     type: String, 
     required: true 
   },
+  // Added GR Number section
+  grNumber: { 
+    type: String, 
+    required: true, 
+    unique: true // Recommended to ensure each student has a unique General Register number
+  },
   password: { 
     type: String, 
     required: true 
@@ -18,8 +24,7 @@ const StudentSchema = new mongoose.Schema({
   },
   rollNo: { 
     type: String, 
-    required: true, 
-    // unique: true 
+    required: false, 
   },
   className: { 
     type: String, 
@@ -33,8 +38,12 @@ const StudentSchema = new mongoose.Schema({
     type: String,
     default: null
   },
+  // Link to Fee Schema: This allows you to store and populate fee details
+  fees: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Fee'
+  }],
   stats: {
-    // attendance: { type: Number, default: 0 },
     avgScore: { type: Number, default: 0 }
   }
 }, { timestamps: true });
