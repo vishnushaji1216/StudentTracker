@@ -11,7 +11,9 @@ const StudentDetail = () => {
   const [student, setStudent] = useState(null);
   const [stats, setStats] = useState({ overall: "0%", subjectPerformance: [] });
   const [isEditing, setIsEditing] = useState(false);
-  const [editForm, setEditForm] = useState({ name: '', mobile: '', className: '' });
+  
+  // UPDATED: Added rollNo to editForm state
+  const [editForm, setEditForm] = useState({ name: '', mobile: '', className: '', rollNo: '' });
 
   // Dummy Fees
   const dummyFees = {
@@ -26,10 +28,32 @@ const StudentDetail = () => {
     const fetchDetail = async () => {
       try {
         const res = await api.get(`/admin/student/${id}`);
-        setStudent(res.data.student);
-        setStats(res.data.stats);
-        setEditForm({ name: res.data.student.name, mobile: res.data.student.mobile, className: res.data.student.className });
-      } catch (error) { alert("Error fetching data"); } finally { setLoading(false); }
+        const data = res.data;
+
+        setStudent(data.identity);
+
+        setStats({
+            overall: data.metrics.avgScore, 
+            subjectPerformance: data.subjects.map(sub => ({
+                subject: sub.name,
+                score: sub.score
+            }))
+        });
+
+        // UPDATED: Initialize editForm with rollNo
+        setEditForm({ 
+            name: data.identity.name, 
+            mobile: data.identity.mobile, 
+            className: data.identity.className,
+            rollNo: data.identity.rollNo 
+        });
+
+      } catch (error) { 
+        console.error("Fetch Error:", error);
+        alert("Error fetching data"); 
+      } finally { 
+        setLoading(false); 
+      }
     };
     fetchDetail();
   }, [id]);
@@ -40,7 +64,10 @@ const StudentDetail = () => {
       setStudent({ ...student, ...editForm });
       setIsEditing(false);
       alert("Profile Updated!");
-    } catch (error) { alert("Update failed"); }
+    } catch (error) { 
+        console.error(error);
+        alert("Update failed"); 
+    }
   };
 
   if (loading) return <div className="p-10 text-center text-slate-500">Loading Profile...</div>;
@@ -57,13 +84,20 @@ const StudentDetail = () => {
           </button>
           
           <div style={{ width: 56, height: 56, borderRadius: '50%', background: '#4f46e5', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, fontWeight: 'bold' }}>
-            {student.name.charAt(0)}
+            {student.initials || student.name.charAt(0)}
           </div>
           <div>
             <h1 style={{ fontSize: 24, margin: 0, color: '#1e293b' }}>{student.name}</h1>
             <div className="flex items-center gap-3 mt-1 text-sm text-slate-500">
                <span className="bg-white border border-slate-200 px-2 py-0.5 rounded text-xs font-bold text-slate-600">Class {student.className}</span>
                <span>Roll No: #{student.rollNo}</span>
+               
+               {/* GR Number (Black & Bold) */}
+               {student.grNumber && (
+                 <span className="text-slate-900 font-bold ml-2">
+                   GR: {student.grNumber}
+                 </span>
+               )}
             </div>
           </div>
         </div>
@@ -108,7 +142,7 @@ const StudentDetail = () => {
                   <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Class</label>
                   {isEditing ? (
                     <select className="input-field" value={editForm.className} onChange={e => setEditForm({...editForm, className: e.target.value})}>
-                      {["9-A", "9-B", "10-A", "10-B"].map(o => <option key={o} value={o}>{o}</option>)}
+                      {["8-A", "8-B", "9-A", "9-B", "10-A", "10-B"].map(o => <option key={o} value={o}>{o}</option>)}
                     </select>
                   ) : (
                     <div className="text-slate-700 font-medium">{student.className}</div>
@@ -116,7 +150,16 @@ const StudentDetail = () => {
                 </div>
                 <div>
                    <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Roll No</label>
-                   <div className="text-slate-700 font-medium">#{student.rollNo}</div>
+                   {/* UPDATED: Editable Roll Number */}
+                   {isEditing ? (
+                     <input 
+                       className="input-field" 
+                       value={editForm.rollNo} 
+                       onChange={e => setEditForm({...editForm, rollNo: e.target.value})} 
+                     />
+                   ) : (
+                     <div className="text-slate-700 font-medium">#{student.rollNo}</div>
+                   )}
                 </div>
               </div>
 

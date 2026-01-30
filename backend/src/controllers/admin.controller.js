@@ -483,11 +483,11 @@ export const getStudentDetail = async (req, res) => {
 export const updateStudentProfile = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, mobile, className } = req.body;
+    const { name, mobile, className, rollNo } = req.body;
     
     const updated = await Student.findByIdAndUpdate(
       id, 
-      { name, mobile, className },
+      { name, mobile, className, rollNo },
       { new: true }
     );
     

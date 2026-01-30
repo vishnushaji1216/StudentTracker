@@ -11,11 +11,14 @@ import {
   BackHandler,
   Platform,
   LayoutAnimation,
-  UIManager
+  UIManager,
+  ActivityIndicator,
+  Alert
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import FontAwesome5 from "react-native-vector-icons/FontAwesome5";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import api from "../../services/api"; // <--- Ensure this path is correct
 
 // Enable LayoutAnimation
 if (Platform.OS === 'android') {
@@ -26,87 +29,57 @@ if (Platform.OS === 'android') {
 
 const SIDEBAR_WIDTH = 280;
 
-// Mock Data
-const SUBJECTS = [
-  {
-    id: 'math',
-    name: 'Mathematics',
-    teacher: 'Mrs. Priya Sharma',
-    initials: 'MA',
-    color: '#4f46e5',
-    bgColor: '#eef2ff',
-    score: 85,
-    avg: 72,
-    statusColor: '#16a34a',
-    chapter: 'Ch 4: Trig',
-    notebook: 'Checked',
-    examName: 'Unit Test 4',
-    examScore: '18',
-    examTotal: '20',
-    isExamDone: true,
-    isWeak: false
-  },
-  {
-    id: 'science',
-    name: 'Science',
-    teacher: 'Mr. Rahul Verma',
-    initials: 'SC',
-    color: '#ea580c',
-    bgColor: '#fff7ed',
-    score: 55,
-    avg: 68,
-    statusColor: '#f97316',
-    chapter: 'Ch 3: Atoms',
-    notebook: 'Pending',
-    examName: 'Quiz 2',
-    examScore: '4',
-    examTotal: '10',
-    isExamDone: true,
-    isWeak: true
-  },
-  {
-    id: 'english',
-    name: 'English',
-    teacher: 'Mrs. Sarah J.',
-    initials: 'EN',
-    color: '#2563eb',
-    bgColor: '#eff6ff',
-    score: 72,
-    avg: 70,
-    statusColor: '#3b82f6',
-    chapter: 'Ch 2: Poems',
-    notebook: 'Checked',
-    examName: 'Reading Test',
-    examScore: null,
-    examTotal: null,
-    isExamDone: false, // Not Conducted
-    isWeak: false
-  }
-];
+export default function StudentDetailScreen({ route, navigation }) {
+  // 1. Get studentId from navigation params (passed from Registry)
+  const { studentId } = route.params || {}; 
 
-export default function StudentDetailScreen({ navigation }) {
+  const [isLoading, setIsLoading] = useState(true);
+  const [studentData, setStudentData] = useState(null);
+  const [expandedId, setExpandedId] = useState(null);
+
+  // Sidebar Animations
   const slideAnim = useRef(new Animated.Value(-SIDEBAR_WIDTH)).current;
   const overlayAnim = useRef(new Animated.Value(0)).current;
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [expandedId, setExpandedId] = useState('math'); 
 
-  // --- NAVIGATION FIX ---
-  // Force back button to go to StudentRegistry
+  // --- FETCH DATA FROM API ---
+  useEffect(() => {
+    fetchStudentDetails();
+  }, [studentId]);
+
+  const fetchStudentDetails = async () => {
+    if (!studentId) return;
+    try {
+      setIsLoading(true);
+      // Calls the new endpoint we just created
+      const response = await api.get(`/admin/student/${studentId}`);
+      setStudentData(response.data);
+      
+      // Expand the first subject by default if available
+      if (response.data.subjects?.length > 0) {
+        setExpandedId(response.data.subjects[0].id);
+      }
+    } catch (error) {
+      console.error("Fetch Error:", error);
+      Alert.alert("Error", "Failed to load student details");
+      navigation.goBack();
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // --- NAVIGATION HANDLERS ---
   const handleBackNavigation = () => {
     if (isSidebarOpen) {
       toggleSidebar();
       return true;
     }
-    // Explicitly navigate to the registry
-    navigation.navigate('StudentRegistry');
+    navigation.goBack();
     return true;
   };
 
   useEffect(() => {
-    const backHandler = BackHandler.addEventListener(
-      "hardwareBackPress",
-      handleBackNavigation
-    );
+    const backHandler = BackHandler.addEventListener("hardwareBackPress", handleBackNavigation);
     return () => backHandler.remove();
   }, [isSidebarOpen]);
 
@@ -125,67 +98,72 @@ export default function StudentDetailScreen({ navigation }) {
   };
 
   const handleLogout = async () => {
-    try {
-      await AsyncStorage.multiRemove(["token", "user", "role"]);
-      navigation.replace("Login", { skipAnimation: true });
-    } catch (error) {
-      console.log("Logout error:", error);
-    }
+    await AsyncStorage.multiRemove(["token", "user", "role"]);
+    navigation.replace("Login");
   };
+
+  // --- LOADING STATE ---
+  if (isLoading) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color="#4f46e5" />
+        <Text style={{ marginTop: 10, color: '#64748b' }}>Loading Profile...</Text>
+      </View>
+    );
+  }
+
+  if (!studentData) return null;
+
+  const { identity, metrics, chart, classTeacher, subjects } = studentData;
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#fff" />
 
-      {/* --- SIDEBAR OVERLAY --- */}
-      <Animated.View
-        style={[styles.overlay, { opacity: overlayAnim }]}
-        pointerEvents={isSidebarOpen ? "auto" : "none"}
-      >
+      {/* SIDEBAR OVERLAY */}
+      <Animated.View style={[styles.overlay, { opacity: overlayAnim }]} pointerEvents={isSidebarOpen ? "auto" : "none"}>
         <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={toggleSidebar} />
       </Animated.View>
 
-      {/* --- SIDEBAR DRAWER --- */}
+      {/* SIDEBAR DRAWER */}
       <Animated.View style={[styles.sidebar, { transform: [{ translateX: slideAnim }] }]}>
-        <View style={styles.sidebarContainer}>
-          <View>
-            <View style={styles.sidebarHeader}>
-              <View style={styles.logoBox}><Text style={styles.logoText}>S</Text></View>
-              <View>
-                <Text style={styles.sidebarTitle}>Stella Admin</Text>
-                <Text style={styles.sidebarVersion}>v5.0.0</Text>
-              </View>
-            </View>
-
-            <View style={styles.menuSection}>
-              <SidebarItem icon="chart-pie" label="Dashboard" onPress={() => { toggleSidebar(); navigation.navigate('AdminDash'); }} />
-              <SidebarItem icon="user-plus" label="Add User" onPress={() => { toggleSidebar(); navigation.navigate('AddUser'); }} />
-              <SidebarItem icon="list-ul" label="Teacher Registry" onPress={() => { toggleSidebar(); navigation.navigate('TeacherRegistry'); }} />
-              <SidebarItem icon="list-ul" label="Student Registry" active onPress={() => { toggleSidebar(); navigation.navigate('StudentRegistry'); }} />
-              <SidebarItem icon="bullhorn" label="Broadcast" onPress={() => {toggleSidebar();navigation.navigate('Broadcast');}}/>
-              <SidebarItem icon="graduation-cap" label="Promotion Tool" />
-              <SidebarItem icon="shield-alt" label="Security" />
-            </View>
-          </View>
-
-          <View style={styles.sidebarFooter}>
-            <View style={styles.footerRow}>
-              <TouchableOpacity style={styles.settingsBtn}>
-                <FontAwesome5 name="cog" size={16} color="#64748b" />
-                <Text style={styles.settingsText}>Settings</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.logoutIconBtn} onPress={handleLogout}>
-                <FontAwesome5 name="sign-out-alt" size={16} color="#ef4444" />
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
+         {/* ... Sidebar Content (Same as before) ... */}
+         <View style={styles.sidebarContainer}>
+           <View>
+             <View style={styles.sidebarHeader}>
+               <View style={styles.logoBox}><Text style={styles.logoText}>S</Text></View>
+               <View>
+                 <Text style={styles.sidebarTitle}>Stella Admin</Text>
+                 <Text style={styles.sidebarVersion}>v5.0.0</Text>
+               </View>
+             </View>
+             <View style={styles.menuSection}>
+               <SidebarItem icon="chart-pie" label="Dashboard" onPress={() => { toggleSidebar(); navigation.navigate('AdminDash'); }} />
+               <SidebarItem icon="user-plus" label="Add User" onPress={() => { toggleSidebar(); navigation.navigate('AddUser'); }} />
+               <SidebarItem icon="list-ul" label="Teacher Registry" onPress={() => { toggleSidebar(); navigation.navigate('TeacherRegistry'); }} />
+               <SidebarItem icon="list-ul" label="Student Registry" active onPress={() => { toggleSidebar(); navigation.navigate('StudentRegistry'); }} />
+               <SidebarItem icon="bullhorn" label="Broadcast" onPress={() => {toggleSidebar();navigation.navigate('Broadcast');}}/>
+               <SidebarItem icon="graduation-cap" label="Promotion Tool" />
+               <SidebarItem icon="shield-alt" label="Security" onPress={() => { toggleSidebar(); navigation.navigate('AdminSetting'); }}/>
+             </View>
+           </View>
+           <View style={styles.sidebarFooter}>
+             <View style={styles.footerRow}>
+               <TouchableOpacity style={styles.settingsBtn}>
+                 <FontAwesome5 name="cog" size={16} color="#64748b" />
+                 <Text style={styles.settingsText}>Settings</Text>
+               </TouchableOpacity>
+               <TouchableOpacity style={styles.logoutIconBtn} onPress={handleLogout}>
+                 <FontAwesome5 name="sign-out-alt" size={16} color="#ef4444" />
+               </TouchableOpacity>
+             </View>
+           </View>
+         </View>
       </Animated.View>
 
-      {/* --- MAIN CONTENT --- */}
       <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
         
-        {/* Header - Uses custom back handler */}
+        {/* HEADER */}
         <View style={styles.header}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 15 }}>
             <TouchableOpacity onPress={handleBackNavigation}>
@@ -200,45 +178,61 @@ export default function StudentDetailScreen({ navigation }) {
 
         <ScrollView style={styles.scrollContent} contentContainerStyle={{ paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
           
-          {/* 1. Identity */}
+          {/* 1. IDENTITY CARD */}
           <View style={styles.profileHeader}>
             <View style={styles.avatarContainer}>
-              <View style={styles.avatar}>
-                <Text style={styles.avatarText}>AK</Text>
-              </View>
+              {identity.profilePic ? (
+                 <Image source={{ uri: identity.profilePic }} style={styles.avatarImage} />
+              ) : (
+                <View style={styles.avatar}>
+                  <Text style={styles.avatarText}>{identity.initials}</Text>
+                </View>
+              )}
             </View>
             <View>
-              <Text style={styles.profileName}>Arjun Kumar</Text>
-              <Text style={styles.profileInfo}>Class 9-A • Roll No. 24</Text>
+              <Text style={styles.profileName}>{identity.name}</Text>
+              <Text style={styles.profileInfo}>Class {identity.className} • Roll {identity.rollNo}</Text>
+              <Text style={styles.grText}>GR: {identity.grNumber}</Text>
             </View>
           </View>
 
-          {/* 2. Metrics */}
+          {/* 2. METRICS GRID */}
           <View style={styles.metricsGrid}>
-            <MetricCard label="ATTENDANCE" value="92%" color="#16a34a" bgColor="#f0fdf4" borderColor="#dcfce7" />
-            <MetricCard label="AVG SCORE" value="78%" color="#2563eb" bgColor="#eff6ff" borderColor="#dbeafe" />
-            <MetricCard label="WRITING" value="A" color="#9333ea" bgColor="#faf5ff" borderColor="#f3e8ff" />
+            <MetricCard label="AVG SCORE" value={metrics.avgScore} color="#2563eb" bgColor="#eff6ff" borderColor="#dbeafe" />
+            <MetricCard 
+              label="FEE STATUS" 
+              value={metrics.feeStatus} 
+              color={metrics.feeStatus === 'Clear' ? "#16a34a" : "#dc2626"} 
+              bgColor={metrics.feeStatus === 'Clear' ? "#f0fdf4" : "#fef2f2"} 
+              borderColor={metrics.feeStatus === 'Clear' ? "#dcfce7" : "#fee2e2"} 
+            />
+            <MetricCard label="WRITING" value={metrics.writingGrade} color="#9333ea" bgColor="#faf5ff" borderColor="#f3e8ff" />
           </View>
 
-          {/* 3. Class Teacher */}
-          <View style={styles.teacherCard}>
-            <Image source={{ uri: "https://i.pravatar.cc/150?img=5" }} style={styles.teacherImg} />
-            <View style={{ flex: 1 }}>
-              <Text style={styles.teacherLabel}>CLASS TEACHER</Text>
-              <Text style={styles.teacherName}>Mrs. Priya Sharma</Text>
+          {/* 3. CLASS TEACHER */}
+          {classTeacher && (
+            <View style={styles.teacherCard}>
+              <Image 
+                source={{ uri: classTeacher.pic || "https://ui-avatars.com/api/?name=" + classTeacher.name }} 
+                style={styles.teacherImg} 
+              />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.teacherLabel}>CLASS TEACHER</Text>
+                <Text style={styles.teacherName}>{classTeacher.name}</Text>
+              </View>
+              <TouchableOpacity style={styles.callBtn} onPress={() => Alert.alert("Call", `Calling ${classTeacher.mobile}`)}>
+                <FontAwesome5 name="phone-alt" size={12} color="#4f46e5" />
+              </TouchableOpacity>
             </View>
-            <TouchableOpacity style={styles.callBtn}>
-              <FontAwesome5 name="phone-alt" size={12} color="#4f46e5" />
-            </TouchableOpacity>
-          </View>
+          )}
 
-          {/* 4. Parent Contact */}
+          {/* 4. PARENT CONTACT */}
           <View style={styles.parentCard}>
             <View>
               <Text style={styles.parentLabel}>PARENT MOBILE</Text>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                 <FontAwesome5 name="phone-alt" size={10} color="#64748b" />
-                <Text style={styles.parentValue}>98765 12345</Text>
+                <Text style={styles.parentValue}>{identity.mobile}</Text>
               </View>
             </View>
             <View style={{ flexDirection: 'row', gap: 8 }}>
@@ -251,39 +245,47 @@ export default function StudentDetailScreen({ navigation }) {
             </View>
           </View>
 
-          {/* 5. Chart */}
+          {/* 5. CHART (Comparison) */}
           <View style={styles.chartCard}>
             <Text style={styles.chartTitle}>OVERALL VS CLASS</Text>
             <View style={styles.barContainer}>
               <View style={styles.barRow}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
-                  <Text style={styles.barLabelStudent}>Arjun (Student)</Text>
-                  <Text style={styles.barValStudent}>78%</Text>
+                  <Text style={styles.barLabelStudent}>{identity.name.split(' ')[0]}</Text>
+                  <Text style={styles.barValStudent}>{chart.studentAvg}%</Text>
                 </View>
                 <View style={styles.barTrack}>
-                  <View style={[styles.barFill, { width: '78%', backgroundColor: '#4f46e5' }]} />
+                  <View style={[styles.barFill, { width: `${chart.studentAvg}%`, backgroundColor: '#4f46e5' }]} />
                 </View>
               </View>
               <View style={styles.barRow}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
                   <Text style={styles.barLabelClass}>Class Average</Text>
-                  <Text style={styles.barValClass}>65%</Text>
+                  <Text style={styles.barValClass}>{chart.classAvg}%</Text>
                 </View>
                 <View style={styles.barTrack}>
-                  <View style={[styles.barFill, { width: '65%', backgroundColor: '#cbd5e1' }]} />
+                  <View style={[styles.barFill, { width: `${chart.classAvg}%`, backgroundColor: '#cbd5e1' }]} />
                 </View>
               </View>
             </View>
             <View style={styles.trendRow}>
-              <FontAwesome5 name="arrow-up" size={10} color="#16a34a" />
-              <Text style={styles.trendText}>Performing above average</Text>
+              <FontAwesome5 
+                name={chart.studentAvg >= chart.classAvg ? "arrow-up" : "arrow-down"} 
+                size={10} 
+                color={chart.studentAvg >= chart.classAvg ? "#16a34a" : "#dc2626"} 
+              />
+              <Text style={[styles.trendText, { color: chart.studentAvg >= chart.classAvg ? "#16a34a" : "#dc2626" }]}>
+                {chart.trend}
+              </Text>
             </View>
           </View>
 
-          {/* 6. Subjects (Accordion) */}
+          {/* 6. SUBJECTS ACCORDION */}
           <Text style={styles.sectionTitle}>SUBJECT BREAKDOWN</Text>
           <View style={styles.subjectList}>
-            {SUBJECTS.map((sub) => (
+            {subjects.length === 0 ? (
+                <Text style={{textAlign:'center', color:'#94a3b8', marginTop:10}}>No subjects found.</Text>
+            ) : subjects.map((sub) => (
               <View key={sub.id} style={[styles.subjectCard, { borderColor: expandedId === sub.id ? sub.color : '#e2e8f0' }]}>
                 
                 {/* Header */}
@@ -302,8 +304,9 @@ export default function StudentDetailScreen({ navigation }) {
                     </View>
                   </View>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                    <View style={[styles.scoreBadge, { backgroundColor: sub.statusColor + '20' }]}>
-                      <Text style={[styles.scoreText, { color: sub.statusColor }]}>{sub.score}%</Text>
+                    {/* Score Badge */}
+                    <View style={[styles.scoreBadge, { backgroundColor: sub.bgColor }]}>
+                       <Text style={[styles.scoreText, { color: sub.color }]}>{sub.isExamDone ? sub.examScore + '%' : 'N/A'}</Text>
                     </View>
                     <FontAwesome5 name={expandedId === sub.id ? "chevron-up" : "chevron-down"} size={12} color="#94a3b8" />
                   </View>
@@ -312,25 +315,6 @@ export default function StudentDetailScreen({ navigation }) {
                 {/* Body */}
                 {expandedId === sub.id && (
                   <View style={styles.subjectBody}>
-                    {/* Mini Graph */}
-                    <View style={styles.miniGraphBox}>
-                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
-                        <Text style={[styles.miniGraphLabel, { color: sub.isWeak ? '#f97316' : '#64748b' }]}>Score: {sub.score}%</Text>
-                        <Text style={styles.miniGraphLabel}>Avg: {sub.avg}%</Text>
-                      </View>
-                      <View style={styles.miniTrack}>
-                        <View style={[styles.avgMarker, { left: `${sub.avg}%` }]} />
-                        <View style={[styles.miniFill, { width: `${sub.score}%`, backgroundColor: sub.color }]} />
-                      </View>
-                      {sub.isWeak && (
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
-                          <FontAwesome5 name="arrow-down" size={8} color="#f97316" />
-                          <Text style={styles.weakText}>Below class average</Text>
-                        </View>
-                      )}
-                    </View>
-
-                    {/* Details Grid */}
                     <View style={styles.detailsGrid}>
                       <DetailItem label="CURRENT CH" value={sub.chapter} />
                       <DetailItem 
@@ -340,7 +324,6 @@ export default function StudentDetailScreen({ navigation }) {
                         icon={sub.notebook === 'Checked' ? 'check' : 'clock'}
                       />
                       
-                      {/* EXAM STATUS LOGIC */}
                       <View style={styles.gridItem}>
                         <Text style={styles.gridLabel}>LATEST EXAM</Text>
                         <Text style={styles.gridValue}>{sub.examName}</Text>
@@ -369,8 +352,7 @@ export default function StudentDetailScreen({ navigation }) {
   );
 }
 
-/* --- SUB-COMPONENTS --- */
-
+// --- SUB-COMPONENTS ---
 const MetricCard = ({ label, value, color, bgColor, borderColor }) => (
   <View style={[styles.metricCard, { backgroundColor: bgColor, borderColor: borderColor }]}>
     <Text style={styles.metricLabel}>{label}</Text>
@@ -395,12 +377,10 @@ const SidebarItem = ({ icon, label, active, onPress }) => (
   </TouchableOpacity>
 );
 
-/* --- STYLES --- */
+// --- STYLES (Kept consistent with your original file) ---
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F8FAFC" },
   safeArea: { flex: 1 },
-
-  /* Sidebar */
   overlay: { position: "absolute", inset: 0, backgroundColor: "rgba(0,0,0,0.5)", zIndex: 50 },
   sidebar: { position: "absolute", left: 0, top: 0, bottom: 0, width: SIDEBAR_WIDTH, backgroundColor: "#fff", zIndex: 51, elevation: 20 },
   sidebarContainer: { flex: 1, paddingTop: Platform.OS === 'ios' ? 50 : 20, paddingHorizontal: 20, justifyContent: 'space-between', paddingBottom: 20 },
@@ -426,9 +406,11 @@ const styles = StyleSheet.create({
 
   profileHeader: { flexDirection: 'row', alignItems: 'center', gap: 16, marginBottom: 20 },
   avatar: { width: 64, height: 64, borderRadius: 32, backgroundColor: '#4f46e5', justifyContent: 'center', alignItems: 'center', shadowColor: '#4f46e5', shadowOffset: {width:0, height:4}, shadowOpacity: 0.3, shadowRadius: 8, elevation: 5 },
+  avatarImage: { width: 64, height: 64, borderRadius: 32 },
   avatarText: { fontSize: 24, fontWeight: 'bold', color: '#fff' },
   profileName: { fontSize: 20, fontWeight: 'bold', color: '#1e293b' },
   profileInfo: { fontSize: 14, color: '#64748b', marginTop: 2 },
+  grText: { fontSize: 12, color: '#94a3b8', fontWeight: 'bold', marginTop: 4 },
 
   metricsGrid: { flexDirection: 'row', gap: 8, marginBottom: 20 },
   metricCard: { flex: 1, padding: 12, borderRadius: 12, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
@@ -457,7 +439,7 @@ const styles = StyleSheet.create({
   barTrack: { height: 8, backgroundColor: '#f1f5f9', borderRadius: 4, overflow: 'hidden' },
   barFill: { height: '100%', borderRadius: 4 },
   trendRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 8 },
-  trendText: { fontSize: 10, fontWeight: 'bold', color: '#16a34a' },
+  trendText: { fontSize: 10, fontWeight: 'bold' },
 
   sectionTitle: { fontSize: 12, fontWeight: 'bold', color: '#94a3b8', marginBottom: 12 },
   subjectList: { gap: 12 },
@@ -471,12 +453,6 @@ const styles = StyleSheet.create({
   scoreText: { fontSize: 10, fontWeight: 'bold' },
   
   subjectBody: { padding: 16, backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#f1f5f9' },
-  miniGraphBox: { marginBottom: 16 },
-  miniGraphLabel: { fontSize: 9, fontWeight: 'bold', marginBottom: 4 },
-  miniTrack: { height: 6, backgroundColor: '#f1f5f9', borderRadius: 3, position: 'relative' },
-  miniFill: { height: '100%', borderRadius: 3 },
-  avgMarker: { position: 'absolute', top: 0, bottom: 0, width: 2, backgroundColor: '#94a3b8', zIndex: 10 },
-  weakText: { fontSize: 9, fontWeight: 'bold', color: '#f97316' },
   
   detailsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   gridItem: { width: '48%', backgroundColor: '#f8fafc', padding: 8, borderRadius: 8, borderWidth: 1, borderColor: '#e2e8f0' },
