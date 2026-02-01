@@ -313,42 +313,60 @@ export const getStudentNotices = async (req, res) => {
 
 // --- NEW: QUIZ CONTROLLERS ---
 
-// 1. GET AVAILABLE QUIZZES
 export const getAvailableQuizzes = async (req, res) => {
   try {
     const studentId = req.user.id;
-    // const student = await Student.findById(studentId);
+    const now = new Date(); // Current Server Time
+    
+    const student = await Student.findById(studentId);
+    if (!student) return res.status(404).json({ message: "Student not found" });
 
-    // Fetch all quizzes (In production, filter by class/teacher)
-    const allQuizzes = await Quiz.find().sort({ createdAt: -1 });
+    // 1. Fetch Assignments for this class
+    const assignments = await Assignment.find({ 
+      className: student.className,
+      type: "quiz",
+      status: { $ne: "Draft" } 
+    }).sort({ scheduledAt: -1 });
 
-    // Check existing submissions
-    const mySubmissions = await Submission.find({ 
-      student: studentId, 
-      type: 'quiz' 
-    });
-    const submittedQuizIds = mySubmissions.map(s => s.quiz.toString());
+    // 2. Get Student's submissions
+    const mySubmissions = await Submission.find({ student: studentId, type: 'quiz' });
 
-    const quizzes = allQuizzes.map(q => {
-      const isTaken = submittedQuizIds.includes(q._id.toString());
-      const submission = mySubmissions.find(s => s.quiz.toString() === q._id.toString());
+    const quizzes = assignments.map(assign => {
+      const submission = mySubmissions.find(s => 
+        (s.quiz && s.quiz.toString() === assign.quizId?.toString()) || 
+        (s.assignment && s.assignment.toString() === assign._id.toString())
+      );
+      
+      const isTaken = !!submission;
+      const isStarted = now >= new Date(assign.scheduledAt);
+      const isExpired = now > new Date(assign.dueDate);
+
+      // --- AUTOMATED STATUS LOGIC ---
+      let uiStatus = "Upcoming";
+      if (isTaken) {
+        uiStatus = "Completed";
+      } else if (isExpired) {
+        uiStatus = "Expired"; // Automation: Tags as expired after dueDate
+      } else if (isStarted) {
+        uiStatus = "Live";
+      }
 
       return {
-        id: q._id,
-        title: q.title,
-        subject: "General", // Placeholder until Quiz model has subject
-        totalQuestions: q.questions.length,
-        duration: "30 Mins",
-        status: isTaken ? "Completed" : "Live",
+        id: assign.quizId,
+        assignmentId: assign._id,
+        title: assign.title,
+        subject: assign.subject || "General",
+        duration: `${assign.duration} Mins`,
+        status: uiStatus, // Now dynamic: Upcoming, Live, Completed, or Expired
         score: isTaken ? submission.obtainedMarks : null,
-        totalMarks: q.totalMarks
+        totalMarks: assign.totalMarks,
+        endTime: assign.dueDate,
+        startTime: assign.scheduledAt
       };
     });
 
     res.json(quizzes);
-
   } catch (error) {
-    console.error("Quiz Fetch Error:", error);
     res.status(500).json({ message: "Failed to fetch quizzes" });
   }
 };
@@ -357,12 +375,21 @@ export const getAvailableQuizzes = async (req, res) => {
 export const getQuizForStudent = async (req, res) => {
   try {
     const { id } = req.params;
+    const now = new Date();
+
+    const assignment = await Assignment.findOne({ quizId: id });
+    if (!assignment) return res.status(404).json({ message: "Assignment details not found" });
+
+    if (now > new Date(assignment.dueDate)) {
+      return res.status(403).json({ message: "This quiz has expired and can no longer be taken." });
+    }
+
     const quiz = await Quiz.findById(id);
-    
     if (!quiz) return res.status(404).json({ message: "Quiz not found" });
 
-    // SECURITY: Map to exclude 'correctAnswer'
-    const sanitizedQuestions = quiz.questions.map(q => ({
+    const isLocked = now < new Date(assignment.scheduledAt);
+
+    const sanitizedQuestions = isLocked ? [] : quiz.questions.map(q => ({
       _id: q._id,
       questionText: q.questionText,
       options: q.options,
@@ -373,7 +400,10 @@ export const getQuizForStudent = async (req, res) => {
       id: quiz._id,
       title: quiz.title,
       questions: sanitizedQuestions,
-      totalMarks: quiz.totalMarks
+      totalMarks: quiz.totalMarks,
+      duration: assignment.duration, 
+      startTime: assignment.scheduledAt, 
+      isLocked: isLocked 
     });
 
   } catch (error) {
@@ -388,37 +418,51 @@ export const submitQuiz = async (req, res) => {
     const { quizId, responses } = req.body;
     const studentId = req.user.id;
 
-    // A. Verify Quiz
     const quiz = await Quiz.findById(quizId);
     if (!quiz) return res.status(404).json({ message: "Quiz not found" });
 
-    // B. Calculate Score
     let score = 0;
+    let correctCount = 0;
+
+    console.log(`\n--- GRADING QUIZ: ${quiz.title} ---`);
+
     const gradedResponses = responses.map(r => {
       const question = quiz.questions[r.questionIndex];
-      // Safety check in case question index is out of bounds
       if (!question) return { ...r, isCorrect: false };
 
-      const isCorrect = question.correctAnswer === r.selectedOption;
-      
-      if (isCorrect) score += question.marks;
+      // FIX 2: Strict Index Comparison
+      // We expect frontend to send the Index (0, 1, 2)
+      const dbIndex = Number(question.correctAnswer);
+      const studentIndex = Number(r.selectedOption); 
+
+      // Compare Indicies
+      const isCorrect = dbIndex === studentIndex;
+
+      console.log(`Q${r.questionIndex + 1}: DB Index [${dbIndex}] vs Student Index [${studentIndex}] -> ${isCorrect ? "CORRECT" : "WRONG"}`);
+
+      if (isCorrect) {
+        score += (Number(question.marks) || 1);
+        correctCount++;
+      }
 
       return {
         questionIndex: r.questionIndex,
-        selectedOption: r.selectedOption,
+        selectedOption: r.selectedOption, 
+        correctAnswer: question.correctAnswer, 
         isCorrect
       };
     });
 
-    // C. Save to Unified Submission Model
-    const submission = await Submission.create({
+    console.log(`FINAL SCORE: ${score}/${quiz.totalMarks}`);
+
+    await Submission.create({
       student: studentId,
-      teacher: quiz.teacher, // Copy teacher for records
+      teacher: quiz.teacher,
       quiz: quizId,
       type: 'quiz',
-      status: 'Graded', // Instantly graded
+      status: 'Graded',
       obtainedMarks: score,
-      totalMarks: quiz.totalMarks, // Snapshot total
+      totalMarks: quiz.totalMarks,
       quizResponses: gradedResponses,
       submittedAt: Date.now()
     });
@@ -426,11 +470,14 @@ export const submitQuiz = async (req, res) => {
     res.status(201).json({ 
       message: "Quiz submitted!", 
       score, 
-      total: quiz.totalMarks 
+      total: quiz.totalMarks,
+      correctCount,
+      totalQuestions: quiz.questions.length,
+      gradedResponses 
     });
 
   } catch (error) {
-    console.error("Quiz Submit Error:", error);
-    res.status(500).json({ message: "Submission failed" });
+    console.error("Submission Error:", error);
+    res.status(500).json({ message: "Submission failed", error: error.message });
   }
-};
+};                        

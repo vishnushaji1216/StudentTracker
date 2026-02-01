@@ -307,7 +307,7 @@ export default function StudentRegistryScreen({ navigation }) {
           </View>
         </Modal>
 
-        {/* BOTTOM NAV */}
+        {/* BOTTOM NAV
         <View style={styles.bottomNav}>
           <TouchableOpacity style={styles.navItem} onPress={() => navigation.navigate('AdminDash')}>
             <FontAwesome5 name="chart-pie" size={20} color="#94a3b8" />
@@ -317,7 +317,7 @@ export default function StudentRegistryScreen({ navigation }) {
             <FontAwesome5 name="user-plus" size={20} color="#94a3b8" />
             <Text style={styles.navLabel}>Add User</Text>
           </TouchableOpacity>
-        </View>
+        </View> */}
       </SafeAreaView>
     </View>
   );

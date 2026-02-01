@@ -264,7 +264,7 @@ export default function TeacherRegistryScreen({ navigation }) {
           />
         </View>
 
-        {/* BOTTOM NAVIGATION */}
+        {/* BOTTOM NAVIGATION
         <View style={styles.bottomNav}>
           <TouchableOpacity style={styles.navItem} onPress={() => navigation?.navigate('AdminDash')}>
             <FontAwesome5 name="chart-pie" size={20} color="#94a3b8" />
@@ -274,7 +274,7 @@ export default function TeacherRegistryScreen({ navigation }) {
             <FontAwesome5 name="user-plus" size={20} color="#4f46e5" />
             <Text style={[styles.navLabel, { color: '#4f46e5' }]}>Add User</Text>
           </TouchableOpacity>
-        </View>
+        </View> */}
         
       </SafeAreaView>
     </View>

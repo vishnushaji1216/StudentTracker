@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Platform } from "react-native";
+import React, { useState, useRef } from "react";
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Platform, Animated } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import FontAwesome5 from "react-native-vector-icons/FontAwesome5";
 import DateTimePicker from '@react-native-community/datetimepicker'; // <--- IMPORT THIS

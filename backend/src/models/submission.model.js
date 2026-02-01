@@ -38,7 +38,7 @@ const SubmissionSchema = new mongoose.Schema({
   quizResponses: [
     {
       questionIndex: { type: Number },
-      selectedOption: { type: Number },
+      selectedOption: { type: mongoose.Schema.Types.Mixed },
       isCorrect: { type: Boolean }
     }
   ],

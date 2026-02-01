@@ -611,11 +611,19 @@ export const getQuizDetail = async (req, res) => {
 export const updateQuiz = async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, duration, passingScore, questions, status } = req.body;
+    const { title, duration, passingScore, questions, status, scheduledAt } = req.body;
 
-    const assignment = await Assignment.findByIdAndUpdate(id, {
-      title, duration, passingScore, questions, status,
-    }, { new:true});
+    let updateData = { title, duration, passingScore, status };
+
+    if (scheduledAt) {
+      const startAt = new Date(scheduledAt);
+      const safeDuration = Number(duration) || 10;
+      const endAt = new Date(startAt.getTime() + safeDuration * 60000);
+      updateData.scheduledAt = startAt;
+      updateData.dueDate = endAt;
+  }
+
+  const assignment = await Assignment.findByIdAndUpdate(id, updateData, { new: true });
 
     if (assignment.quizId && questions) {
       const newTotal = questions.reduce((sum, q) => sum + (Number(q.marks) || 1), 0);

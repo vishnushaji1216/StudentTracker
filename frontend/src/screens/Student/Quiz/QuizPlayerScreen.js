@@ -1,381 +1,212 @@
 import React, { useState, useRef, useEffect } from "react";
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  ScrollView,
-  StatusBar,
-  Animated,
-  BackHandler,
-  Platform,
-  Dimensions,
-  UIManager,
-  Alert
-} from "react-native";
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, StatusBar, Animated, BackHandler, Platform, Dimensions, UIManager, Alert, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import FontAwesome5 from "react-native-vector-icons/FontAwesome5";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import api from "../../../services/api";
 
-// Enable Animations
-if (Platform.OS === 'android') {
+if (Platform.OS === "android") {
   if (UIManager.setLayoutAnimationEnabledExperimental) {
     UIManager.setLayoutAnimationEnabledExperimental(true);
   }
 }
 
-const SIDEBAR_WIDTH = 280;
-const { width } = Dimensions.get('window');
+export default function QuizPlayerScreen({ route, navigation }) {
+  const { quizId } = route.params;
 
-// Mock Questions
-const QUESTIONS = [
-  {
-    id: 1,
-    question: "Which of the following is the correct formula for the area of a circle?",
-    options: ["2πr", "πr²", "2πr²", "πd"],
-  },
-  {
-    id: 2,
-    question: "What is the value of Pi (π) to two decimal places?",
-    options: ["3.14", "3.41", "3.12", "3.24"],
-  },
-  {
-    id: 3,
-    question: "If the radius of a circle is 5cm, what is its diameter?",
-    options: ["2.5cm", "5cm", "10cm", "25cm"],
-  },
-];
-
-export default function QuizPlayerScreen({ navigation }) {
-  // Sidebar State
-  const slideAnim = useRef(new Animated.Value(-SIDEBAR_WIDTH)).current;
-  const overlayAnim = useRef(new Animated.Value(0)).current;
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-
-  // Quiz State
+  const [quizData, setQuizData] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
-  const [answers, setAnswers] = useState({}); // { 0: 1, 1: 3 } (QuestionIndex: OptionIndex)
-  const [timeLeft, setTimeLeft] = useState(1800); // 30 minutes in seconds
+  const [answers, setAnswers] = useState({}); // Stores INDEX now
+  const [timeLeft, setTimeLeft] = useState(0);
+  const [reviewMode, setReviewMode] = useState(false);
+  const [gradedData, setGradedData] = useState([]);
 
-  // Handle Android Back Button (Prevent Accidental Exit)
-  useEffect(() => {
-    const backHandler = BackHandler.addEventListener("hardwareBackPress", () => {
-      if (isSidebarOpen) {
-        toggleSidebar();
-        return true;
-      }
-      
-      Alert.alert(
-        "Quit Quiz?",
-        "Progress will be lost. Are you sure?",
-        [
-          { text: "Cancel", style: "cancel" },
-          { text: "Quit", style: "destructive", onPress: () => navigation.navigate('StudentQuizCenter') }
-        ]
-      );
-      return true;
-    });
-    return () => backHandler.remove();
-  }, [isSidebarOpen]);
+  useEffect(() => { fetchQuizDetails(); }, []);
 
-  // Timer Logic
+  const fetchQuizDetails = async () => {
+    try {
+      setLoading(true);
+      const res = await api.get(`/student/quiz/${quizId}`);
+      setQuizData(res.data);
+      // Use duration from API, fallback to 30 if missing
+      const duration = res.data.duration ? Number(res.data.duration) : 30;
+      setTimeLeft(duration * 60);
+    } catch {
+      Alert.alert("Error", "Could not load quiz.");
+      navigation.goBack();
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
+    if (!quizData || reviewMode) return;
     const timerId = setInterval(() => {
-      setTimeLeft((prev) => {
-        if (prev <= 1) {
-          clearInterval(timerId);
-          handleSubmit(); // Auto-submit
-          return 0;
-        }
+      setTimeLeft(prev => {
+        if (prev <= 1) { clearInterval(timerId); submitQuiz(); return 0; }
         return prev - 1;
       });
     }, 1000);
     return () => clearInterval(timerId);
-  }, []);
+  }, [quizData, reviewMode]);
 
-  const formatTime = (seconds) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
-  };
-
-  const toggleSidebar = () => {
-    const isOpen = isSidebarOpen;
-    Animated.parallel([
-      Animated.timing(slideAnim, { toValue: isOpen ? -SIDEBAR_WIDTH : 0, duration: 300, useNativeDriver: true }),
-      Animated.timing(overlayAnim, { toValue: isOpen ? 0 : 0.5, duration: 300, useNativeDriver: true }),
-    ]).start();
-    setIsSidebarOpen(!isOpen);
-  };
-
-  const handleLogout = async () => {
-    try {
-      await AsyncStorage.multiRemove(["token", "user", "role"]);
-      navigation.replace("Login", { skipAnimation: true });
-    } catch (error) {
-      console.log("Logout error:", error);
-    }
-  };
-
-  const handleNav = (screen) => {
-    // Confirm before leaving
-    Alert.alert(
-      "Leave Quiz?",
-      "Your progress will be lost.",
-      [
+  useEffect(() => {
+    const backHandler = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (reviewMode) { navigation.goBack(); return true; }
+      Alert.alert("Quit Quiz?", "Progress will be lost.", [
         { text: "Cancel", style: "cancel" },
-        { 
-          text: "Leave", 
-          style: "destructive", 
-          onPress: () => {
-            toggleSidebar();
-            navigation.navigate(screen);
-          }
-        }
-      ]
-    );
-  };
-
-  const selectOption = (optionIndex) => {
-    setAnswers({
-      ...answers,
-      [currentQuestionIndex]: optionIndex
+        { text: "Quit", style: "destructive", onPress: () => navigation.goBack() }
+      ]);
+      return true;
     });
+    return () => backHandler.remove();
+  }, [reviewMode]);
+
+  const formatTime = s => `${Math.floor(s / 60)}:${s % 60 < 10 ? "0" : ""}${s % 60}`;
+
+  // FIX: Store the INDEX (0, 1, 2) not the text
+  const selectOption = (index) => { 
+      if (!reviewMode) {
+          setAnswers({ ...answers, [currentQuestionIndex]: index }); 
+      }
   };
 
   const handleNext = () => {
-    if (currentQuestionIndex < QUESTIONS.length - 1) {
-      setCurrentQuestionIndex(currentQuestionIndex + 1);
-    } else {
-      handleSubmit();
+    if (currentQuestionIndex < quizData.questions.length - 1) setCurrentQuestionIndex(currentQuestionIndex + 1);
+    else if (!reviewMode) confirmSubmit();
+  };
+
+  const handlePrev = () => { if (currentQuestionIndex > 0) setCurrentQuestionIndex(currentQuestionIndex - 1); };
+
+  const confirmSubmit = () => {
+    Alert.alert("Submit Quiz", "Are you sure?", [
+      { text: "Cancel", style: "cancel" },
+      { text: "Submit", onPress: submitQuiz }
+    ]);
+  };
+
+  const submitQuiz = async () => {
+    try {
+      setLoading(true);
+      // Construct responses using stored INDICES
+      const responses = Object.keys(answers).map(i => ({ 
+          questionIndex: parseInt(i), 
+          selectedOption: answers[i] // This is now a number (0,1,2)
+      }));
+      
+      const res = await api.post("/student/quiz/submit", { quizId, responses });
+      setGradedData(res.data.gradedResponses || []);
+      setReviewMode(true);
+    } catch {
+      Alert.alert("Error", "Submission failed.");
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handlePrev = () => {
-    if (currentQuestionIndex > 0) {
-      setCurrentQuestionIndex(currentQuestionIndex - 1);
-    }
-  };
+  if (loading || !quizData) {
+    return <View style={styles.loader}><ActivityIndicator size="large" color="#4f46e5" /></View>;
+  }
 
-  const handleSubmit = () => {
-    navigation.replace('StudentQuizResult'); // Go to results
-  };
-
-  const currentQ = QUESTIONS[currentQuestionIndex];
-  const progressPercent = ((currentQuestionIndex + 1) / QUESTIONS.length) * 100;
+  const currentQ = quizData.questions[currentQuestionIndex];
+  const progressPercent = ((currentQuestionIndex + 1) / quizData.questions.length) * 100;
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#4f46e5" />
 
-      {/* --- SIDEBAR OVERLAY --- */}
-      <Animated.View
-        style={[styles.overlay, { opacity: overlayAnim }]}
-        pointerEvents={isSidebarOpen ? "auto" : "none"}
-      >
-        <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={toggleSidebar} />
-      </Animated.View>
-
-      {/* --- SIDEBAR DRAWER --- */}
-      <Animated.View style={[styles.sidebar, { transform: [{ translateX: slideAnim }] }]}>
-        <View style={styles.sidebarContainer}>
-          <View>
-            <View style={styles.sidebarHeader}>
-              <View style={styles.logoBox}>
-                <Text style={styles.logoText}>AK</Text>
-              </View>
-              <View>
-                <Text style={styles.sidebarTitle}>Arjun Kumar</Text>
-                <Text style={styles.sidebarVersion}>Class 9-A</Text>
-              </View>
-            </View>
-
-            <ScrollView style={styles.menuScroll} showsVerticalScrollIndicator={false}>
-              <SidebarItem icon="home" label="Home" onPress={() => handleNav('StudentDash')} />
-              <SidebarItem icon="chart-bar" label="Academic Stats" onPress={() => handleNav('StudentStats')} />
-              <SidebarItem icon="folder-open" label="Resource Library" />
-              
-              <View style={styles.menuDivider} />
-              <Text style={styles.menuSectionLabel}>ACADEMICS</Text>
-              
-              <SidebarItem icon="microphone" label="Daily Audio" />
-              <SidebarItem icon="pen-fancy" label="Handwriting" />
-              <SidebarItem icon="list-check" label="Quiz Center" active onPress={() => { toggleSidebar(); /* Already here */ }} />
-
-              <View style={styles.menuDivider} />
-              <SidebarItem icon="circle-question" label="Help & Support" />
-            </ScrollView>
-          </View>
-
-          <View style={styles.sidebarFooter}>
-            <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
-              <FontAwesome5 name="sign-out-alt" size={16} color="#ef4444" />
-              <Text style={styles.logoutText}>Sign Out</Text>
+      <View style={styles.header}>
+        <SafeAreaView>
+          <View style={styles.navRow}>
+            <TouchableOpacity onPress={reviewMode ? navigation.goBack : confirmSubmit}>
+              <FontAwesome5 name="arrow-left" size={20} color="#fff" />
             </TouchableOpacity>
-          </View>
-        </View>
-      </Animated.View>
-
-      {/* --- MAIN CONTENT --- */}
-      <View style={styles.mainContent}>
-        
-        {/* Header (Blue) */}
-        <View style={styles.header}>
-           <SafeAreaView edges={['top', 'left', 'right']}>
-              <View style={styles.navRow}>
-                <TouchableOpacity onPress={() => {
-                   Alert.alert("Quit Quiz?", "Progress will be lost.", [
-                     { text: "Cancel", style: "cancel" },
-                     { text: "Quit", style: "destructive", onPress: () => navigation.goBack() }
-                   ]);
-                }}>
-                   <FontAwesome5 name="arrow-left" size={20} color="rgba(255,255,255,0.8)" />
-                </TouchableOpacity>
-                <View style={styles.timerBox}>
-                   <Text style={styles.timerLabel}>TIME REMAINING</Text>
-                   <Text style={styles.timerValue}>{formatTime(timeLeft)}</Text>
-                </View>
-              </View>
-              
-              <View style={styles.quizInfo}>
-                 <Text style={styles.quizTitle}>Weekly Math Test</Text>
-                 
-                 <View style={styles.progressRow}>
-                    <Text style={styles.progressText}>Question {currentQuestionIndex + 1} of {QUESTIONS.length}</Text>
-                    <View style={styles.progressBarBg}>
-                       <View style={[styles.progressBarFill, { width: `${progressPercent}%` }]} />
-                    </View>
-                 </View>
-              </View>
-           </SafeAreaView>
-        </View>
-
-        {/* Question Body */}
-        <ScrollView style={styles.scrollContent} contentContainerStyle={{ padding: 20 }}>
-            
-            <Text style={styles.questionText}>
-              {currentQ.question}
-            </Text>
-
-            <View style={styles.optionsContainer}>
-               {currentQ.options.map((option, index) => {
-                  const isSelected = answers[currentQuestionIndex] === index;
-                  return (
-                    <TouchableOpacity 
-                       key={index}
-                       style={[styles.optionCard, isSelected && styles.optionCardSelected]}
-                       activeOpacity={0.8}
-                       onPress={() => selectOption(index)}
-                    >
-                       <View style={[styles.radioCircle, isSelected && styles.radioCircleSelected]}>
-                          {isSelected && <View style={styles.radioDot} />}
-                       </View>
-                       <Text style={[styles.optionText, isSelected && styles.optionTextSelected]}>
-                          {option}
-                       </Text>
-                    </TouchableOpacity>
-                  );
-               })}
+            <View style={styles.timerBox}>
+              <Text style={styles.timerLabel}>{reviewMode ? "REVIEW MODE" : "TIME REMAINING"}</Text>
+              {!reviewMode && <Text style={styles.timerValue}>{formatTime(timeLeft)}</Text>}
             </View>
+          </View>
 
-        </ScrollView>
+          <Text style={styles.quizTitle}>{quizData.title}</Text>
 
-        {/* Footer Navigation */}
-        <SafeAreaView edges={['bottom']} style={styles.footer}>
-           <TouchableOpacity 
-             style={styles.prevBtn} 
-             onPress={handlePrev}
-             disabled={currentQuestionIndex === 0}
-           >
-              <FontAwesome5 
-                name="arrow-left" 
-                size={14} 
-                color={currentQuestionIndex === 0 ? "#cbd5e1" : "#94a3b8"} 
-              />
-              <Text style={[styles.prevText, currentQuestionIndex === 0 && { color: "#cbd5e1" }]}>Prev</Text>
-           </TouchableOpacity>
-
-           <TouchableOpacity style={styles.nextBtn} onPress={handleNext}>
-              <Text style={styles.nextText}>
-                {currentQuestionIndex === QUESTIONS.length - 1 ? "Submit" : "Next"}
-              </Text>
-              <FontAwesome5 
-                name={currentQuestionIndex === QUESTIONS.length - 1 ? "check" : "arrow-right"} 
-                size={14} 
-                color="#fff" 
-              />
-           </TouchableOpacity>
+          <View style={styles.progressRow}>
+            <Text style={styles.progressText}>Question {currentQuestionIndex + 1} of {quizData.questions.length}</Text>
+            <View style={styles.progressBarBg}>
+              <View style={[styles.progressBarFill, { width: `${progressPercent}%` }]} />
+            </View>
+          </View>
         </SafeAreaView>
-
       </View>
+
+      <ScrollView contentContainerStyle={{ padding: 20 }}>
+        <Text style={styles.questionText}>{currentQ.questionText}</Text>
+
+        {currentQ.options.map((option, index) => {
+          // Compare Indices
+          const isSelected = answers[currentQuestionIndex] === index; 
+          
+          // Review Mode Logic
+          const correctIdx = Number(gradedData[currentQuestionIndex]?.correctAnswer); 
+          const isCorrect = reviewMode && correctIdx === index;
+          const isWrong = reviewMode && isSelected && !isCorrect;
+
+          return (
+            <TouchableOpacity 
+                key={index} 
+                disabled={reviewMode} 
+                onPress={() => selectOption(index)} // PASS INDEX HERE
+                style={[
+                    styles.optionCard, 
+                    isSelected && styles.optionCardSelected, 
+                    isCorrect && { borderColor: "#22c55e", backgroundColor: "#f0fdf4" }, 
+                    isWrong && { borderColor: "#ef4444", backgroundColor: "#fef2f2" }
+                ]}
+            >
+              <View style={[styles.radioCircle, isSelected && styles.radioCircleSelected]}>
+                  {isSelected && <View style={styles.radioDot} />}
+              </View>
+              <Text style={styles.optionText}>{option}</Text>
+              {isCorrect && <FontAwesome5 name="check-circle" size={18} color="#22c55e" />}
+              {isWrong && <FontAwesome5 name="times-circle" size={18} color="#ef4444" />}
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+
+      <SafeAreaView style={styles.footer}>
+        <TouchableOpacity onPress={handlePrev} disabled={currentQuestionIndex === 0}>
+          <Text style={styles.prevText}>Prev</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.nextBtn} onPress={handleNext}>
+          <Text style={styles.nextText}>{reviewMode ? "Done" : currentQuestionIndex === quizData.questions.length - 1 ? "Submit" : "Next"}</Text>
+        </TouchableOpacity>
+      </SafeAreaView>
     </View>
   );
 }
 
-/* --- SUB-COMPONENTS --- */
-const SidebarItem = ({ icon, label, onPress, active }) => (
-  <TouchableOpacity style={[styles.sidebarItem, active && styles.sidebarItemActive]} onPress={onPress}>
-    <FontAwesome5 name={icon} size={16} color={active ? "#4f46e5" : "#64748b"} style={{ width: 24 }} />
-    <Text style={[styles.sidebarItemText, active && { color: "#4f46e5", fontWeight: '700' }]}>{label}</Text>
-  </TouchableOpacity>
-);
-
-/* --- STYLES --- */
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#F8FAFC" },
-  mainContent: { flex: 1 },
-
-  /* Sidebar (Standard) */
-  overlay: { position: "absolute", inset: 0, backgroundColor: "rgba(0,0,0,0.5)", zIndex: 50 },
-  sidebar: { position: "absolute", left: 0, top: 0, bottom: 0, width: SIDEBAR_WIDTH, backgroundColor: "#fff", zIndex: 51, elevation: 20 },
-  sidebarContainer: { flex: 1, paddingTop: Platform.OS === 'ios' ? 50 : 20, paddingHorizontal: 20, justifyContent: 'space-between', paddingBottom: 20 },
-  sidebarHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 30, paddingBottom: 20, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
-  logoBox: { width: 40, height: 40, backgroundColor: '#4f46e5', borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
-  logoText: { color: 'white', fontWeight: 'bold', fontSize: 20 },
-  sidebarTitle: { fontWeight: 'bold', fontSize: 16, color: '#1e293b' },
-  sidebarVersion: { fontSize: 11, color: '#94a3b8' },
-  menuScroll: { marginTop: 20, flex: 1 },
-  menuDivider: { height: 1, backgroundColor: '#f1f5f9', marginVertical: 10 },
-  menuSectionLabel: { fontSize: 10, fontWeight: 'bold', color: '#94a3b8', marginBottom: 8, marginLeft: 12, letterSpacing: 0.5 },
-  sidebarItem: { flexDirection: 'row', alignItems: 'center', padding: 12, borderRadius: 12 },
-  sidebarItemActive: { backgroundColor: '#eef2ff' },
-  sidebarItemText: { fontSize: 14, fontWeight: '600', color: '#64748b' },
-  sidebarFooter: { borderTopWidth: 1, borderTopColor: '#f1f5f9', paddingTop: 10 },
-  logoutBtn: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10, width: '100%' },
-  logoutText: { color: '#ef4444', fontWeight: 'bold', fontSize: 14 },
-
-  /* Header */
-  header: { backgroundColor: '#4f46e5', paddingHorizontal: 20, paddingBottom: 24, borderBottomLeftRadius: 32, borderBottomRightRadius: 32, zIndex: 10, shadowColor: "#4f46e5", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 5 },
-  navRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20, marginTop: 10 },
-  timerBox: { alignItems: 'flex-end' },
-  timerLabel: { fontSize: 10, color: 'rgba(255,255,255,0.7)', fontWeight: 'bold', marginBottom: 2 },
-  timerValue: { fontSize: 20, fontWeight: 'bold', color: '#fff', fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' },
-  
-  quizInfo: { width: '100%' },
-  quizTitle: { fontSize: 20, fontWeight: 'bold', color: '#fff', marginBottom: 8 },
-  progressRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  progressText: { color: '#c7d2fe', fontSize: 12, fontWeight: '600' },
-  progressBarBg: { width: 100, height: 6, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 3 },
-  progressBarFill: { height: '100%', backgroundColor: '#fff', borderRadius: 3 },
-
-  /* Content */
-  scrollContent: { flex: 1, backgroundColor: '#f8fafc' },
-  questionText: { fontSize: 18, fontWeight: 'bold', color: '#1e293b', marginBottom: 24, lineHeight: 28 },
-  optionsContainer: { gap: 12 },
-  
-  /* Options */
-  optionCard: { flexDirection: 'row', alignItems: 'center', gap: 16, backgroundColor: '#fff', padding: 16, borderRadius: 16, borderWidth: 2, borderColor: 'transparent', shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
-  optionCardSelected: { borderColor: '#4f46e5', backgroundColor: '#eef2ff' },
-  radioCircle: { width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: '#cbd5e1', alignItems: 'center', justifyContent: 'center' },
-  radioCircleSelected: { borderColor: '#4f46e5', backgroundColor: '#4f46e5' },
-  radioDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#fff' },
-  optionText: { flex: 1, fontSize: 14, fontWeight: '600', color: '#475569' },
-  optionTextSelected: { color: '#4f46e5', fontWeight: 'bold' },
-
-  /* Footer */
-  footer: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#f1f5f9' },
-  prevBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 12, borderRadius: 12 },
-  prevText: { fontSize: 14, fontWeight: 'bold', color: '#94a3b8' },
-  nextBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#4f46e5', paddingVertical: 12, paddingHorizontal: 32, borderRadius: 16, shadowColor: '#4f46e5', shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
-  nextText: { color: '#fff', fontSize: 14, fontWeight: 'bold' },
+  container:{flex:1,backgroundColor:"#F8FAFC"},
+  loader:{flex:1,justifyContent:"center",alignItems:"center"},
+  header:{backgroundColor:"#4f46e5",padding:20,paddingBottom:24,borderBottomLeftRadius:32,borderBottomRightRadius:32},
+  navRow:{flexDirection:"row",justifyContent:"space-between"},
+  timerBox:{alignItems:"flex-end"},
+  timerLabel:{fontSize:10,color:"#c7d2fe",fontWeight:"bold"},
+  timerValue:{fontSize:20,fontWeight:"bold",color:"#fff"},
+  quizTitle:{fontSize:20,fontWeight:"bold",color:"#fff",marginVertical:10},
+  progressRow:{flexDirection:"row",justifyContent:"space-between",alignItems:"center"},
+  progressText:{color:"#c7d2fe",fontSize:12},
+  progressBarBg:{width:100,height:6,backgroundColor:"rgba(255,255,255,0.3)",borderRadius:3},
+  progressBarFill:{height:"100%",backgroundColor:"#fff",borderRadius:3},
+  questionText:{fontSize:18,fontWeight:"bold",marginBottom:24,color:"#1e293b"},
+  optionCard:{flexDirection:"row",alignItems:"center",gap:12,backgroundColor:"#fff",padding:16,borderRadius:16,borderWidth:2,borderColor:"transparent",marginBottom:12},
+  optionCardSelected:{borderColor:"#4f46e5",backgroundColor:"#eef2ff"},
+  radioCircle:{width:24,height:24,borderRadius:12,borderWidth:2,borderColor:"#cbd5e1",alignItems:"center",justifyContent:"center"},
+  radioCircleSelected:{backgroundColor:"#4f46e5",borderColor:"#4f46e5"},
+  radioDot:{width:8,height:8,borderRadius:4,backgroundColor:"#fff"},
+  optionText:{flex:1,fontWeight:"600",color:"#475569"},
+  footer:{flexDirection:"row",justifyContent:"space-between",padding:20,backgroundColor:"#fff"},
+  prevText:{fontWeight:"bold",color:"#94a3b8"},
+  nextBtn:{backgroundColor:"#4f46e5",paddingHorizontal:32,paddingVertical:12,borderRadius:16},
+  nextText:{color:"#fff",fontWeight:"bold"}
 });
