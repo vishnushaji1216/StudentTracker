@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   View,
   Text,
@@ -6,11 +6,9 @@ import {
   StyleSheet,
   ScrollView,
   StatusBar,
-  Animated,
   BackHandler,
   Platform,
   Linking,
-  Dimensions,
   UIManager,
   ActivityIndicator,
   RefreshControl,
@@ -21,29 +19,24 @@ import FontAwesome5 from "react-native-vector-icons/FontAwesome5";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect } from "@react-navigation/native";
 import api from "../../services/api";
+import StudentSidebar from "../../components/StudentSidebar"; // <--- Import Component
 
-// Enable Animations
 if (Platform.OS === 'android') {
   if (UIManager.setLayoutAnimationEnabledExperimental) {
     UIManager.setLayoutAnimationEnabledExperimental(true);
   }
 }
 
-const { width } = Dimensions.get('window');
-const SIDEBAR_WIDTH = Math.min(280, width * 0.8);
-
 export default function StudentProfileScreen({ navigation }) {
-  // Sidebar State
-  const slideAnim = useRef(new Animated.Value(-SIDEBAR_WIDTH)).current;
-  const overlayAnim = useRef(new Animated.Value(0)).current;
+  // --- STATE: Sidebar ---
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
-  // Data State
+  // --- STATE: Data ---
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [profileData, setProfileData] = useState({
-    profile: { name: "", className: "", rollNo: "", initials: "" },
-    siblings: [], // <--- This will come from API, not Mock Data
+    profile: { name: "", className: "", rollNo: "", initials: "", profilePic: null },
+    siblings: [],
     teachers: []
   });
 
@@ -51,7 +44,7 @@ export default function StudentProfileScreen({ navigation }) {
   useEffect(() => {
     const backHandler = BackHandler.addEventListener("hardwareBackPress", () => {
       if (isSidebarOpen) {
-        toggleSidebar();
+        setIsSidebarOpen(false);
         return true;
       }
       navigation.navigate('StudentDash');
@@ -70,13 +63,10 @@ export default function StudentProfileScreen({ navigation }) {
   const fetchProfile = async () => {
     try {
       const response = await api.get('/student/profile');
-      
       const data = response.data;
       
-      // Ensure initials exist
       data.profile.initials = data.profile.name ? data.profile.name.substring(0, 2).toUpperCase() : "ST";
       
-      // Process siblings initials
       if (data.siblings) {
         data.siblings = data.siblings.map(s => ({
             ...s,
@@ -98,29 +88,7 @@ export default function StudentProfileScreen({ navigation }) {
     fetchProfile();
   };
 
-  const toggleSidebar = () => {
-    const isOpen = isSidebarOpen;
-    setIsSidebarOpen(!isOpen);
-
-    Animated.parallel([
-      Animated.timing(slideAnim, { 
-        toValue: isOpen ? -SIDEBAR_WIDTH : 0, 
-        duration: 300, 
-        useNativeDriver: true 
-      }),
-      Animated.timing(overlayAnim, { 
-        toValue: isOpen ? 0 : 0.5, 
-        duration: 300, 
-        useNativeDriver: true 
-      }),
-    ]).start();
-  };
-
-  const handleNav = (screen) => {
-    toggleSidebar();
-    navigation.navigate(screen);
-  };
-
+  // --- ACTIONS ---
   const handleLogout = async () => {
     try {
       await AsyncStorage.multiRemove(["token", "user", "role"]);
@@ -130,23 +98,47 @@ export default function StudentProfileScreen({ navigation }) {
     }
   };
 
+  const handleAudioPress = async () => {
+      // Quick check for active audio task
+      try {
+          const res = await api.get('/student/dashboard');
+          const { dailyMission, pendingList } = res.data;
+          
+          if (dailyMission && dailyMission.type === 'audio') {
+              navigation.navigate('AudioRecorder', { 
+                  assignmentId: dailyMission.id || dailyMission._id, 
+                  taskTitle: dailyMission.title 
+              });
+              return;
+          }
+          
+          const pendingAudio = pendingList.find(t => t.type === 'audio');
+          if (pendingAudio) {
+              navigation.navigate('AudioRecorder', { 
+                  assignmentId: pendingAudio.id || pendingAudio._id, 
+                  taskTitle: pendingAudio.title 
+              });
+              return;
+          }
+          
+          alert("No active audio tasks found.");
+      } catch (e) {
+          console.error("Audio check failed", e);
+      }
+  };
+
   const handleSwitchAccount = async (siblingId) => {
     try {
-      setLoading(true); // Show spinner while switching
-
-      // 1. Call Backend to get new token
+      setLoading(true);
       const response = await api.post('/auth/switch', { targetId: siblingId });
       const { token, user } = response.data;
 
-      // 2. Hot-Swap the Credentials in Storage
       await AsyncStorage.multiSet([
         ["token", token],
         ["user", JSON.stringify(user)],
         ["role", user.role || 'parent']
       ]);
 
-      // 3. Force Reset Navigation to Dashboard
-      // This ensures the Dashboard re-mounts and fetches new data for the new student
       navigation.reset({
         index: 0,
         routes: [{ name: 'StudentDash' }],
@@ -184,55 +176,16 @@ export default function StudentProfileScreen({ navigation }) {
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#fff" />
 
-      {/* --- SIDEBAR OVERLAY --- */}
-      <Animated.View
-        style={[
-          styles.overlay, 
-          { 
-            opacity: overlayAnim,
-            transform: [{ translateX: isSidebarOpen ? 0 : -width }] 
-          }
-        ]}
-      >
-        <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={toggleSidebar} />
-      </Animated.View>
-
-      {/* --- SIDEBAR DRAWER --- */}
-      <Animated.View style={[styles.sidebar, { transform: [{ translateX: slideAnim }] }]}>
-        <SafeAreaView style={styles.sidebarSafeArea}>
-            <View style={styles.sidebarContainer}>
-                <View style={styles.sidebarContentWrapper}>
-                    <View style={styles.sidebarHeader}>
-                        <View style={styles.logoBox}>
-                            <Text style={styles.logoText}>{profile.initials}</Text>
-                        </View>
-                        <View>
-                            <Text style={styles.sidebarTitle}>{profile.name}</Text>
-                            <Text style={styles.sidebarVersion}>{profile.className}</Text>
-                        </View>
-                    </View>
-
-                    <ScrollView style={styles.menuScroll} contentContainerStyle={{paddingBottom: 20}} showsVerticalScrollIndicator={false}>
-                        <SidebarItem icon="home" label="Home" onPress={() => handleNav('StudentDash')} />
-                        <SidebarItem icon="chart-bar" label="Academic Stats" onPress={() => handleNav('StudentStats')} />
-                        <SidebarItem icon="folder-open" label="Resource Library" onPress={() => handleNav('StudentResource')} />
-                        <SidebarItem icon="list-ol" label="Quiz Center" onPress={() => handleNav('StudentQuizCenter')}/>
-                        <SidebarItem icon="microphone" label="Daily Audio" onPress={() => handleNav('AudioRecorder')} />
-                        <SidebarItem icon="bullhorn" label="Notice" onPress={() => handleNav('StudentNoticeBoard')} />
-                        <View style={styles.menuDivider} />
-                        <SidebarItem icon="question-circle" label="Help & Support" />
-                    </ScrollView>
-                </View>
-
-                <View style={styles.sidebarFooter}>
-                    <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
-                        <FontAwesome5 name="sign-out-alt" size={16} color="#ef4444" />
-                        <Text style={styles.logoutText}>Sign Out</Text>
-                    </TouchableOpacity>
-                </View>
-            </View>
-        </SafeAreaView>
-      </Animated.View>
+      {/* --- REUSABLE SIDEBAR --- */}
+      <StudentSidebar 
+        isOpen={isSidebarOpen}
+        onClose={() => setIsSidebarOpen(false)}
+        navigation={navigation}
+        activeRoute="" // No active route highlight for Profile usually, or create a 'StudentProfile' key
+        userInfo={profile}
+        onLogout={handleLogout}
+        onAudioPress={handleAudioPress}
+      />
 
       {/* --- MAIN CONTENT --- */}
       <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
@@ -240,7 +193,7 @@ export default function StudentProfileScreen({ navigation }) {
         {/* Header */}
         <View style={styles.header}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 15 }}>
-            <TouchableOpacity onPress={toggleSidebar} style={styles.menuButton}>
+            <TouchableOpacity onPress={() => setIsSidebarOpen(true)} style={styles.menuButton}>
               <FontAwesome5 name="bars" size={20} color="#334155" />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>My Profile</Text>
@@ -264,7 +217,7 @@ export default function StudentProfileScreen({ navigation }) {
               <Text style={styles.profileClass}>{profile.className} • Roll No. {profile.rollNo}</Text>
             </View>
 
-            {/* 2. Sibling Switcher (ONLY SHOW IF SIBLINGS EXIST) */}
+            {/* 2. Sibling Switcher */}
             {siblings.length > 0 && (
               <>
                 <Text style={styles.sectionTitle}>SWITCH ACCOUNT</Text>
@@ -312,7 +265,7 @@ export default function StudentProfileScreen({ navigation }) {
                 <View key={teacher.id} style={styles.teacherCard}>
                   <View style={styles.teacherLeft}>
                     <View style={[styles.teacherImg, { backgroundColor: '#f1f5f9', justifyContent:'center', alignItems:'center' }]}>
-                         <FontAwesome5 name="user" size={16} color="#94a3b8" />
+                          <FontAwesome5 name="user" size={16} color="#94a3b8" />
                     </View>
                     <View>
                       <Text style={styles.teacherNameCard}>{teacher.name}</Text>
@@ -378,43 +331,9 @@ export default function StudentProfileScreen({ navigation }) {
   );
 }
 
-/* --- SUB-COMPONENTS --- */
-const SidebarItem = ({ icon, label, onPress, active }) => (
-  <TouchableOpacity style={[styles.sidebarItem, active && styles.sidebarItemActive]} onPress={onPress}>
-    <View style={{ width: 30, alignItems: 'center' }}>
-        <FontAwesome5 name={icon} size={16} color={active ? "#4f46e5" : "#64748b"} />
-    </View>
-    <Text style={[styles.sidebarItemText, active && { color: "#4f46e5", fontWeight: '700' }]}>{label}</Text>
-  </TouchableOpacity>
-);
-
-/* --- STYLES --- */
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F8FAFC" },
   safeArea: { flex: 1 },
-
-  /* Sidebar */
-  overlay: { position: "absolute", top: 0, bottom: 0, left: 0, right: 0, backgroundColor: "rgba(0,0,0,0.5)", zIndex: 100 },
-  sidebar: { position: "absolute", left: 0, top: 0, bottom: 0, width: SIDEBAR_WIDTH, backgroundColor: "#fff", zIndex: 101, elevation: 20, shadowColor: "#000", shadowOffset: { width: 2, height: 0 }, shadowOpacity: 0.25, shadowRadius: 3.84 },
-  sidebarSafeArea: { flex: 1, backgroundColor: '#fff' },
-  sidebarContainer: { flex: 1, paddingHorizontal: 20, paddingBottom: 20, justifyContent: 'space-between' },
-  sidebarContentWrapper: { flex: 1 }, 
-  
-  sidebarHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 20, marginBottom: 10, paddingBottom: 20, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
-  logoBox: { width: 40, height: 40, backgroundColor: '#fff', borderWidth: 2, borderColor: '#e0e7ff', borderRadius: 20, justifyContent: 'center', alignItems: 'center' },
-  logoText: { color: '#4f46e5', fontWeight: 'bold', fontSize: 14 },
-  sidebarTitle: { fontWeight: 'bold', fontSize: 16, color: '#1e293b' },
-  sidebarVersion: { fontSize: 11, color: '#94a3b8' },
-  menuScroll: { marginTop: 10 },
-  menuDivider: { height: 1, backgroundColor: '#f1f5f9', marginVertical: 10 },
-  menuSectionLabel: { fontSize: 10, fontWeight: 'bold', color: '#94a3b8', marginBottom: 8, marginLeft: 12, letterSpacing: 0.5 },
-  sidebarItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 8, borderRadius: 12, marginBottom: 2 },
-  sidebarItemActive: { backgroundColor: '#eef2ff' },
-  sidebarItemText: { fontSize: 14, fontWeight: '600', color: '#64748b', marginLeft: 8 },
-  
-  sidebarFooter: { borderTopWidth: 1, borderTopColor: '#f1f5f9', paddingTop: 15 },
-  logoutBtn: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10 },
-  logoutText: { color: '#ef4444', fontWeight: 'bold' },
 
   /* Header */
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 16, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },

@@ -6,20 +6,21 @@ import {
   StyleSheet,
   ScrollView,
   StatusBar,
-  Animated,
   BackHandler,
   Platform,
   Dimensions,
   UIManager,
   FlatList,
   Alert,
-  LayoutAnimation
+  LayoutAnimation,
+  ActivityIndicator
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import FontAwesome5 from "react-native-vector-icons/FontAwesome5";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import api from "../../services/api";
+import StudentSidebar from "../../components/StudentSidebar"; // <--- Import Component
 
-// Enable Animations
 if (Platform.OS === 'android') {
   if (UIManager.setLayoutAnimationEnabledExperimental) {
     UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -27,9 +28,8 @@ if (Platform.OS === 'android') {
 }
 
 const { width } = Dimensions.get('window');
-const SIDEBAR_WIDTH = Math.min(280, width * 0.8);
 
-// Mock Resources
+// Mock Resources (Ideally fetch from API)
 const ALL_RESOURCES = [
   { id: '1', name: 'Ch 5 - Formulas.pdf', size: '2.4 MB', date: 'Today', type: 'pdf', icon: 'file-pdf', color: '#ef4444', bg: '#fef2f2', subject: 'Math' },
   { id: '2', name: 'Poem Recitation.mp3', size: '5.1 MB', date: 'Yesterday', type: 'audio', icon: 'music', color: '#a855f7', bg: '#f3e8ff', subject: 'English' },
@@ -41,24 +41,23 @@ const ALL_RESOURCES = [
 const FILTERS = ['All', 'Math', 'Science', 'English'];
 
 export default function StudentResourceScreen({ navigation }) {
-  // Sidebar State
-  const slideAnim = useRef(new Animated.Value(-SIDEBAR_WIDTH)).current;
-  const overlayAnim = useRef(new Animated.Value(0)).current;
+  // --- STATE ---
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-
-  // Student Info (Mock)
-  const [studentName, setStudentName] = useState("Arjun");
-  const [className, setClassName] = useState("Class 9-A");
-
-  // Screen State
   const [activeFilter, setActiveFilter] = useState('All');
   const [resources, setResources] = useState(ALL_RESOURCES);
+  
+  // Student Info for Sidebar
+  const [studentInfo, setStudentInfo] = useState({ name: 'Student', className: '', initials: 'ST', profilePic: null });
 
-  // Handle Android Back Button
+  // --- EFFECTS ---
+  useEffect(() => {
+    loadUserData();
+  }, []);
+
   useEffect(() => {
     const backHandler = BackHandler.addEventListener("hardwareBackPress", () => {
       if (isSidebarOpen) {
-        toggleSidebar();
+        setIsSidebarOpen(false);
         return true;
       }
       navigation.navigate('StudentDash');
@@ -67,37 +66,61 @@ export default function StudentResourceScreen({ navigation }) {
     return () => backHandler.remove();
   }, [isSidebarOpen]);
 
-  const toggleSidebar = () => {
-    const isOpen = isSidebarOpen;
-    setIsSidebarOpen(!isOpen);
-
-    Animated.parallel([
-      Animated.timing(slideAnim, { 
-        toValue: isOpen ? -SIDEBAR_WIDTH : 0, 
-        duration: 300, 
-        useNativeDriver: true 
-      }),
-      Animated.timing(overlayAnim, { 
-        toValue: isOpen ? 0 : 0.5, 
-        duration: 300, 
-        useNativeDriver: true 
-      }),
-    ]).start();
+  // --- DATA LOADING ---
+  const loadUserData = async () => {
+    try {
+        const userStr = await AsyncStorage.getItem("user");
+        if (userStr) {
+            const u = JSON.parse(userStr);
+            setStudentInfo({
+                name: u.name,
+                className: u.className || "Class",
+                initials: u.name ? u.name.substring(0, 2).toUpperCase() : "ST",
+                profilePic: u.profilePic
+            });
+        }
+    } catch (e) {
+        console.log("Error loading user data", e);
+    }
   };
 
+  // --- ACTIONS ---
   const handleLogout = async () => {
     try {
       await AsyncStorage.multiRemove(["token", "user", "role"]);
-      // navigation.replace("Login", { skipAnimation: true });
-      console.log("Logged out");
+      navigation.replace("Login");
     } catch (error) {
       console.log("Logout error:", error);
     }
   };
 
-  const handleNav = (screen) => {
-    toggleSidebar();
-    navigation.navigate(screen);
+  const handleAudioPress = async () => {
+      // Quick check for active audio task
+      try {
+          const res = await api.get('/student/dashboard');
+          const { dailyMission, pendingList } = res.data;
+          
+          if (dailyMission && dailyMission.type === 'audio') {
+              navigation.navigate('AudioRecorder', { 
+                  assignmentId: dailyMission.id || dailyMission._id, 
+                  taskTitle: dailyMission.title 
+              });
+              return;
+          }
+          
+          const pendingAudio = pendingList.find(t => t.type === 'audio');
+          if (pendingAudio) {
+              navigation.navigate('AudioRecorder', { 
+                  assignmentId: pendingAudio.id || pendingAudio._id, 
+                  taskTitle: pendingAudio.title 
+              });
+              return;
+          }
+          
+          alert("No active audio tasks found.");
+      } catch (e) {
+          console.error("Audio check failed", e);
+      }
   };
 
   const handleFilter = (filter) => {
@@ -118,6 +141,7 @@ export default function StudentResourceScreen({ navigation }) {
     Alert.alert(action, `${item.name}`);
   };
 
+  // --- RENDER ITEM ---
   const renderResourceItem = ({ item }) => (
     <TouchableOpacity 
       style={styles.fileCard} 
@@ -156,62 +180,16 @@ export default function StudentResourceScreen({ navigation }) {
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#fff" />
 
-      {/* --- SIDEBAR OVERLAY --- */}
-      <Animated.View
-        style={[
-          styles.overlay, 
-          { 
-            opacity: overlayAnim,
-            transform: [{ translateX: isSidebarOpen ? 0 : -width }] 
-          }
-        ]}
-      >
-        <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={toggleSidebar} />
-      </Animated.View>
-
-      {/* --- SIDEBAR DRAWER --- */}
-      <Animated.View style={[styles.sidebar, { transform: [{ translateX: slideAnim }] }]}>
-        <SafeAreaView style={styles.sidebarSafeArea}>
-            <View style={styles.sidebarContainer}>
-                {/* Top Section (Header + Menu) */}
-                <View style={styles.sidebarContentWrapper}>
-                    <View style={styles.sidebarHeader}>
-                        <View style={styles.avatarLarge}>
-                            <Text style={styles.avatarTextLarge}>AK</Text>
-                        </View>
-                        <View>
-                            <Text style={styles.sidebarName}>{studentName}</Text>
-                            <Text style={styles.sidebarClass}>{className}</Text>
-                        </View>
-                    </View>
-
-                    <ScrollView style={styles.menuScroll} contentContainerStyle={{paddingBottom: 20}} showsVerticalScrollIndicator={false}>
-                        <SidebarItem icon="home" label="Home" onPress={() => handleNav('StudentDash')} />
-                        <SidebarItem icon="chart-bar" label="Academic Stats" onPress={() => handleNav('StudentStats')} />
-                        <SidebarItem icon="folder-open" label="Resource Library" active onPress={() => toggleSidebar()} />
-                        
-                        {/* <View style={styles.menuDivider} />
-                        <Text style={styles.menuSectionLabel}>ACADEMICS</Text> */}
-                        
-                        <SidebarItem icon="list-ol" label="Quiz Center" onPress={() => handleNav('StudentQuizCenter')}/>
-                        <SidebarItem icon="microphone" label="Daily Audio" onPress={() => handleNav('AudioRecorder')} />
-                        <SidebarItem icon="bullhorn" label="Notice" onPress={() => handleNav('StudentNoticBoard')} />
-                        
-                        <View style={styles.menuDivider} />
-                        <SidebarItem icon="question-circle" label="Help & Support" />
-                    </ScrollView>
-                </View>
-
-                {/* Bottom Footer */}
-                <View style={styles.sidebarFooter}>
-                    <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
-                        <FontAwesome5 name="sign-out-alt" size={16} color="#ef4444" />
-                        <Text style={styles.logoutText}>Sign Out</Text>
-                    </TouchableOpacity>
-                </View>
-            </View>
-        </SafeAreaView>
-      </Animated.View>
+      {/* --- REUSABLE SIDEBAR --- */}
+      <StudentSidebar 
+        isOpen={isSidebarOpen}
+        onClose={() => setIsSidebarOpen(false)}
+        navigation={navigation}
+        activeRoute="StudentResource"
+        userInfo={studentInfo}
+        onLogout={handleLogout}
+        onAudioPress={handleAudioPress}
+      />
 
       {/* --- MAIN CONTENT --- */}
       <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
@@ -219,7 +197,7 @@ export default function StudentResourceScreen({ navigation }) {
         {/* Header */}
         <View style={styles.header}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 15 }}>
-            <TouchableOpacity onPress={toggleSidebar} style={styles.menuButton}>
+            <TouchableOpacity onPress={() => setIsSidebarOpen(true)} style={styles.menuButton}>
               <FontAwesome5 name="bars" size={20} color="#334155" />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Library</Text>
@@ -232,17 +210,19 @@ export default function StudentResourceScreen({ navigation }) {
         <View style={styles.contentContainer}>
             
             {/* Filter Chips */}
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll} contentContainerStyle={{ paddingRight: 20 }}>
-                {FILTERS.map((filter) => (
-                    <TouchableOpacity 
-                        key={filter}
-                        style={[styles.filterChip, activeFilter === filter && styles.filterChipActive]}
-                        onPress={() => handleFilter(filter)}
-                    >
-                        <Text style={[styles.filterText, activeFilter === filter && styles.filterTextActive]}>{filter}</Text>
-                    </TouchableOpacity>
-                ))}
-            </ScrollView>
+            <View>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll} contentContainerStyle={{ paddingRight: 20 }}>
+                    {FILTERS.map((filter) => (
+                        <TouchableOpacity 
+                            key={filter}
+                            style={[styles.filterChip, activeFilter === filter && styles.filterChipActive]}
+                            onPress={() => handleFilter(filter)}
+                        >
+                            <Text style={[styles.filterText, activeFilter === filter && styles.filterTextActive]}>{filter}</Text>
+                        </TouchableOpacity>
+                    ))}
+                </ScrollView>
+            </View>
 
             {/* File List */}
             <FlatList
@@ -285,44 +265,9 @@ export default function StudentResourceScreen({ navigation }) {
   );
 }
 
-/* --- SUB-COMPONENTS --- */
-const SidebarItem = ({ icon, label, onPress, active }) => (
-  <TouchableOpacity style={[styles.sidebarItem, active && styles.sidebarItemActive]} onPress={onPress}>
-    <View style={{ width: 30, alignItems: 'center' }}>
-        <FontAwesome5 name={icon} size={16} color={active ? "#4f46e5" : "#64748b"} />
-    </View>
-    <Text style={[styles.sidebarItemText, active && { color: "#4f46e5", fontWeight: '700' }]}>{label}</Text>
-  </TouchableOpacity>
-);
-
-/* --- STYLES --- */
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F8FAFC" },
   safeArea: { flex: 1 },
-
-  /* Sidebar */
-  overlay: { position: "absolute", top: 0, bottom: 0, left: 0, right: 0, backgroundColor: "rgba(0,0,0,0.5)", zIndex: 100 },
-  sidebar: { position: "absolute", left: 0, top: 0, bottom: 0, width: SIDEBAR_WIDTH, backgroundColor: "#fff", zIndex: 101, elevation: 20, shadowColor: "#000", shadowOffset: { width: 2, height: 0 }, shadowOpacity: 0.25, shadowRadius: 3.84 },
-  sidebarSafeArea: { flex: 1, backgroundColor: '#fff' },
-  sidebarContainer: { flex: 1, paddingHorizontal: 20, paddingBottom: 20, justifyContent: 'space-between' },
-  sidebarContentWrapper: { flex: 1 }, 
-  
-  sidebarHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 20, marginBottom: 10, paddingBottom: 20, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
-  avatarLarge: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#fff', borderWidth: 2, borderColor: '#e0e7ff', justifyContent: 'center', alignItems: 'center' },
-  avatarTextLarge: { fontSize: 18, fontWeight: 'bold', color: '#4f46e5' },
-  sidebarName: { fontSize: 16, fontWeight: 'bold', color: '#1e293b' },
-  sidebarClass: { fontSize: 12, color: '#64748b' },
-  
-  menuScroll: { marginTop: 10 },
-  menuDivider: { height: 1, backgroundColor: '#f1f5f9', marginVertical: 10 },
-  menuSectionLabel: { fontSize: 10, fontWeight: 'bold', color: '#94a3b8', marginBottom: 8, marginLeft: 12, letterSpacing: 0.5 },
-  sidebarItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 8, borderRadius: 12, marginBottom: 2 },
-  sidebarItemActive: { backgroundColor: '#eef2ff' },
-  sidebarItemText: { fontSize: 14, fontWeight: '600', color: '#64748b', marginLeft: 8 },
-  
-  sidebarFooter: { borderTopWidth: 1, borderTopColor: '#f1f5f9', paddingTop: 15 },
-  logoutBtn: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10 },
-  logoutText: { color: '#ef4444', fontWeight: 'bold' },
 
   /* Header */
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 16, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },

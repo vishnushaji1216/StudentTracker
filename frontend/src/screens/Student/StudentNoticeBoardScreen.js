@@ -1,32 +1,26 @@
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   View,
   Text,
   TouchableOpacity,
   StyleSheet,
-  ScrollView,
   StatusBar,
-  Animated,
   BackHandler,
   Platform,
-  Dimensions,
   FlatList,
   ActivityIndicator,
-  RefreshControl
+  RefreshControl,
+  Animated // Kept for Toast Animation if needed
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import FontAwesome5 from "react-native-vector-icons/FontAwesome5";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect } from "@react-navigation/native";
 import api from "../../services/api";
-
-const { width } = Dimensions.get('window');
-const SIDEBAR_WIDTH = Math.min(280, width * 0.8);
+import StudentSidebar from "../../components/StudentSidebar"; // <--- Import Component
 
 export default function StudentNoticeBoardScreen({ navigation }) {
   // --- STATE: Sidebar ---
-  const slideAnim = useRef(new Animated.Value(-SIDEBAR_WIDTH)).current;
-  const overlayAnim = useRef(new Animated.Value(0)).current;
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   // --- STATE: Data ---
@@ -36,7 +30,7 @@ export default function StudentNoticeBoardScreen({ navigation }) {
   const [activeFilter, setActiveFilter] = useState('All');
   
   // Student Info for Sidebar
-  const [studentInfo, setStudentInfo] = useState({ name: 'Student', class: '', initials: 'ST' });
+  const [studentInfo, setStudentInfo] = useState({ name: 'Student', className: '', initials: 'ST', profilePic: null });
 
   // --- API CALLS ---
   const fetchData = async () => {
@@ -45,15 +39,27 @@ export default function StudentNoticeBoardScreen({ navigation }) {
       const noticeRes = await api.get('/student/notices');
       setNotices(noticeRes.data);
 
-      // 2. Fetch Profile (to show name in sidebar)
-      // If you store this in Context, you can remove this call
-      const profileRes = await api.get('/student/profile');
-      const s = profileRes.data.profile;
-      setStudentInfo({
-          name: s.name,
-          class: s.className,
-          initials: s.name ? s.name.substring(0,2).toUpperCase() : 'ST'
-      });
+      // 2. Fetch Profile/User from Cache or API
+      const userStr = await AsyncStorage.getItem("user");
+      if (userStr) {
+          const u = JSON.parse(userStr);
+          setStudentInfo({
+              name: u.name,
+              className: u.className, // Ensure backend sends className not class
+              initials: u.name ? u.name.substring(0,2).toUpperCase() : 'ST',
+              profilePic: u.profilePic
+          });
+      } else {
+          // Fallback if cache is empty
+          const profileRes = await api.get('/student/profile');
+          const s = profileRes.data.profile;
+          setStudentInfo({
+              name: s.name,
+              className: s.className,
+              initials: s.name ? s.name.substring(0,2).toUpperCase() : 'ST',
+              profilePic: s.profilePic
+          });
+      }
 
     } catch (error) {
       console.error("Failed to load notices", error);
@@ -74,37 +80,7 @@ export default function StudentNoticeBoardScreen({ navigation }) {
     fetchData();
   };
 
-  // --- FILTER LOGIC ---
-  const filteredNotices = notices.filter(item => {
-    if (activeFilter === 'All') return true;
-    if (activeFilter === 'School') return item.type === 'school'; // Admin/Parents/Everyone
-    if (activeFilter === 'Class') return item.type === 'class';   // Teacher/Class
-    return true;
-  });
-
-  // --- SIDEBAR HANDLERS (Safe Animation) ---
-  const toggleSidebar = () => {
-    if (isSidebarOpen) {
-      // Closing: Animate -> Then unmount
-      Animated.parallel([
-        Animated.timing(slideAnim, { toValue: -SIDEBAR_WIDTH, duration: 300, useNativeDriver: true }),
-        Animated.timing(overlayAnim, { toValue: 0, duration: 300, useNativeDriver: true }),
-      ]).start(() => setIsSidebarOpen(false));
-    } else {
-      // Opening: Mount -> Then animate
-      setIsSidebarOpen(true);
-      Animated.parallel([
-        Animated.timing(slideAnim, { toValue: 0, duration: 300, useNativeDriver: true }),
-        Animated.timing(overlayAnim, { toValue: 1, duration: 300, useNativeDriver: true }),
-      ]).start();
-    }
-  };
-
-  const handleNav = (screen) => {
-    toggleSidebar();
-    setTimeout(() => navigation.navigate(screen), 50);
-  };
-
+  // --- ACTIONS ---
   const handleLogout = async () => {
     try {
         await AsyncStorage.multiRemove(["token", "user", "role"]);
@@ -112,11 +88,45 @@ export default function StudentNoticeBoardScreen({ navigation }) {
     } catch(e) { console.log(e); }
   };
 
+  // --- AUDIO LOGIC FOR SIDEBAR ---
+  const handleAudioPress = async () => {
+      // Since we don't have dashboard data loaded on this screen by default,
+      // we do a quick check or navigate to Dashboard to handle it.
+      // Better approach: Quick fetch to check status.
+      try {
+          const res = await api.get('/student/dashboard');
+          const { dailyMission, pendingList } = res.data;
+          
+          if (dailyMission && dailyMission.type === 'audio') {
+              navigation.navigate('AudioRecorder', { 
+                  assignmentId: dailyMission.id || dailyMission._id, 
+                  taskTitle: dailyMission.title 
+              });
+              return;
+          }
+          
+          const pendingAudio = pendingList.find(t => t.type === 'audio');
+          if (pendingAudio) {
+              navigation.navigate('AudioRecorder', { 
+                  assignmentId: pendingAudio.id || pendingAudio._id, 
+                  taskTitle: pendingAudio.title 
+              });
+              return;
+          }
+
+          // If no tasks, show alert (since we removed Toast from this screen to simplify)
+          alert("No active audio tasks found.");
+          
+      } catch (e) {
+          console.error("Audio check failed", e);
+      }
+  };
+
   // Back Button Handler
   useEffect(() => {
     const backHandler = BackHandler.addEventListener("hardwareBackPress", () => {
       if (isSidebarOpen) {
-        toggleSidebar();
+        setIsSidebarOpen(false);
         return true;
       }
       navigation.goBack();
@@ -125,6 +135,14 @@ export default function StudentNoticeBoardScreen({ navigation }) {
     return () => backHandler.remove();
   }, [isSidebarOpen]);
 
+
+  // --- FILTER LOGIC ---
+  const filteredNotices = notices.filter(item => {
+    if (activeFilter === 'All') return true;
+    if (activeFilter === 'School') return item.type === 'school'; 
+    if (activeFilter === 'Class') return item.type === 'class'; 
+    return true;
+  });
 
   // --- RENDER ITEM ---
   const renderNoticeItem = ({ item }) => {
@@ -176,16 +194,25 @@ export default function StudentNoticeBoardScreen({ navigation }) {
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#fff" />
 
-      {/* ======================================================= */}
-      {/* 1. MAIN CONTENT (Top Layer for Sidebar Fix) */}
-      {/* ======================================================= */}
+      {/* --- REUSABLE SIDEBAR --- */}
+      <StudentSidebar 
+        isOpen={isSidebarOpen}
+        onClose={() => setIsSidebarOpen(false)}
+        navigation={navigation}
+        activeRoute="StudentNoticeBoard"
+        userInfo={studentInfo}
+        onLogout={handleLogout}
+        onAudioPress={handleAudioPress}
+      />
+
+      {/* --- MAIN CONTENT --- */}
       <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
         
         {/* Header */}
         <View style={styles.header}>
           <View style={styles.headerTop}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 15 }}>
-              <TouchableOpacity onPress={toggleSidebar} style={styles.menuButton}>
+              <TouchableOpacity onPress={() => setIsSidebarOpen(true)} style={styles.menuButton}>
                 <FontAwesome5 name="bars" size={20} color="#334155" />
               </TouchableOpacity>
               <Text style={styles.headerTitle}>Announcements</Text>
@@ -252,94 +279,14 @@ export default function StudentNoticeBoardScreen({ navigation }) {
         </View>
 
       </SafeAreaView>
-
-      {/* ======================================================= */}
-      {/* 2. SIDEBAR & OVERLAY (Bottom of Return for Z-Index) */}
-      {/* ======================================================= */}
-      {isSidebarOpen && (
-        <Animated.View style={[styles.overlay, { opacity: overlayAnim }]}>
-           <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={toggleSidebar} />
-        </Animated.View>
-      )}
-
-      <Animated.View style={[styles.sidebar, { transform: [{ translateX: slideAnim }] }]}>
-        <SafeAreaView style={styles.sidebarSafeArea}>
-            <View style={styles.sidebarContainer}>
-                <View style={{flex: 1}}>
-                    {/* Sidebar Header */}
-                    <View style={styles.sidebarHeader}>
-                        <View style={{flexDirection:'row', alignItems:'center', gap:10}}>
-                            <View style={styles.avatarLarge}>
-                                <Text style={styles.avatarTextLarge}>{studentInfo.initials}</Text>
-                            </View>
-                            <View>
-                                <Text style={styles.sidebarName}>{studentInfo.name}</Text>
-                                <Text style={styles.sidebarClass}>{studentInfo.class}</Text>
-                            </View>
-                        </View>
-                        <TouchableOpacity onPress={toggleSidebar} style={{padding:5}}>
-                            <FontAwesome5 name="times" size={18} color="#94a3b8" />
-                        </TouchableOpacity>
-                    </View>
-
-                    {/* Menu Items */}
-                    <ScrollView style={styles.menuScroll} contentContainerStyle={{paddingBottom: 20}} showsVerticalScrollIndicator={false}>
-                        <SidebarItem icon="home" label="Home" onPress={() => handleNav('StudentDash')} />
-                        <SidebarItem icon="chart-bar" label="Academic Stats" onPress={() => handleNav('StudentStats')} />
-                        <SidebarItem icon="folder-open" label="Resource Library" onPress={() => handleNav('StudentResource')} />
-                        <SidebarItem icon="list-ol" label="Quiz Center" onPress={() => handleNav('StudentQuizCenter')}/>
-                        <SidebarItem icon="microphone" label="Daily Audio" onPress={() => handleNav('AudioRecorder')} />
-                        <SidebarItem icon="bullhorn" label="Notice" active />
-                    </ScrollView>
-                </View>
-
-                {/* Footer */}
-                <View style={styles.sidebarFooter}>
-                    <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
-                        <FontAwesome5 name="sign-out-alt" size={16} color="#ef4444" />
-                        <Text style={styles.logoutText}>Sign Out</Text>
-                    </TouchableOpacity>
-                </View>
-            </View>
-        </SafeAreaView>
-      </Animated.View>
-
     </View>
   );
 }
 
-/* --- SUB-COMPONENTS --- */
-const SidebarItem = ({ icon, label, onPress, active }) => (
-  <TouchableOpacity style={[styles.sidebarItem, active && styles.sidebarItemActive]} onPress={onPress}>
-    <View style={{ width: 30, alignItems: 'center' }}>
-        <FontAwesome5 name={icon} size={16} color={active ? "#4f46e5" : "#64748b"} />
-    </View>
-    <Text style={[styles.sidebarItemText, active && { color: "#4f46e5", fontWeight: '700' }]}>{label}</Text>
-  </TouchableOpacity>
-);
-
-/* --- STYLES --- */
+// --- STYLES ---
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F8FAFC" },
   safeArea: { flex: 1 },
-
-  /* Sidebar */
-  overlay: { position: "absolute", top: 0, bottom: 0, left: 0, right: 0, backgroundColor: "rgba(0,0,0,0.5)", zIndex: 100 },
-  sidebar: { position: "absolute", left: 0, top: 0, bottom: 0, width: SIDEBAR_WIDTH, backgroundColor: "#fff", zIndex: 101, elevation: 20 },
-  sidebarSafeArea: { flex: 1, backgroundColor: '#fff' },
-  sidebarContainer: { flex: 1, paddingHorizontal: 20, paddingBottom: 20, justifyContent: 'space-between' },
-  sidebarHeader: { flexDirection: 'row', alignItems: 'center', justifyContent:'space-between', marginTop: 20, marginBottom: 10, paddingBottom: 20, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
-  avatarLarge: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#fff', borderWidth: 2, borderColor: '#e0e7ff', justifyContent: 'center', alignItems: 'center' },
-  avatarTextLarge: { fontSize: 18, fontWeight: 'bold', color: '#4f46e5' },
-  sidebarName: { fontSize: 16, fontWeight: 'bold', color: '#1e293b' },
-  sidebarClass: { fontSize: 12, color: '#64748b' },
-  menuScroll: { marginTop: 10 },
-  sidebarItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 8, borderRadius: 12, marginBottom: 2 },
-  sidebarItemActive: { backgroundColor: '#eef2ff' },
-  sidebarItemText: { fontSize: 14, fontWeight: '600', color: '#64748b', marginLeft: 8 },
-  sidebarFooter: { borderTopWidth: 1, borderTopColor: '#f1f5f9', paddingTop: 15 },
-  logoutBtn: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10 },
-  logoutText: { color: '#ef4444', fontWeight: 'bold' },
 
   /* Header */
   header: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 12, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
