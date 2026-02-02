@@ -17,6 +17,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import FontAwesome5 from "react-native-vector-icons/FontAwesome5";
 import Svg, { Path, Circle, Line, Defs, LinearGradient, Stop, Text as SvgText } from "react-native-svg";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import api from '../../services/api.js';
 
 // Enable Animations
 if (Platform.OS === 'android') {
@@ -35,10 +36,16 @@ export default function StudentStatsScreen({ navigation }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   // Student Info (Mock)
-  const [studentName, setStudentName] = useState("Arjun");
-  const [className, setClassName] = useState("Class 9-A");
+  const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState({
+      overall: 0,
+      classAvg: 0,
+      graphData: [],
+      subjectPerformance: [],
+      recentHistory: []
+  });
 
-  // Handle Android Back Button
+    // Handle Android Back Button
   useEffect(() => {
     const backHandler = BackHandler.addEventListener("hardwareBackPress", () => {
       if (isSidebarOpen) {

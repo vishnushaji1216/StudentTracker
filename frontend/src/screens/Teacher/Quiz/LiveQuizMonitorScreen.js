@@ -71,7 +71,7 @@ export default function LiveQuizMonitorScreen({ route, navigation }) {
 
         return {
            id: sub._id,
-           name: sub.student.name,
+           name: sub.student?.name || "Unknown Student",
            initials: sub.student.name.substring(0,2).toUpperCase(),
            rollNo: sub.student.rollNo,
            bg: status === 'finished' ? '#dcfce7' : '#f1f5f9',

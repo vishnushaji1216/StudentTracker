@@ -8,7 +8,6 @@ import Teacher from "./models/teacher.model.js";
 import Student from "./models/student.model.js";
 import Syllabus from "./models/syllabus.model.js"; 
 import Assignment from "./models/assignment.model.js";
-import Submission from "./models/submission.model.js";
 
 dotenv.config({ path: "./.env" });
 
@@ -28,16 +27,6 @@ const generatePassword = (name, mobile) => {
     return `${namePart}${phonePart}`;
 };
 
-const getRandomScore = (max) => {
-    const min = Math.ceil(max * 0.4);
-    return Math.floor(Math.random() * (max - min + 1)) + min;
-};
-
-// Shuffle helper to pick 5 random teachers
-const getRandomTeachers = (teachers, count) => {
-    return [...teachers].sort(() => 0.5 - Math.random()).slice(0, count);
-};
-
 const seedData = async () => {
   await connectDB();
 
@@ -47,85 +36,105 @@ const seedData = async () => {
     await Student.deleteMany();
     await Syllabus.deleteMany(); 
     await Assignment.deleteMany();
-    await Submission.deleteMany();
 
     const teacherExcelData = []; 
     const studentExcelData = [];
 
+    // Define the 6 classes
+    const classes = ["8-A", "8-B", "9-A", "9-B", "10-A", "10-B"];
+
     // --- 1. CREATE 10 TEACHERS ---
     console.log("👨‍🏫 Creating 10 Teachers...");
+    
+    // 10 Teacher Profiles
     const teacherSpecs = [
-        { name: "Priya Sharma", mobile: "9876543210", code: "T-101", class: "9-A", sub: "Mathematics" },
-        { name: "Rohan Verma", mobile: "9876543211", code: "T-102", class: "10-A", sub: "Science" },
-        { name: "Anjali Gupta", mobile: "9876543212", code: "T-103", class: "8-A", sub: "English" },
-        { name: "Suresh Raina", mobile: "9876543213", code: "T-104", class: null, sub: "History" },
-        { name: "Vikram Rathore", mobile: "9876543214", code: "T-105", class: null, sub: "Geography" },
-        { name: "Meera Bai", mobile: "9876543215", code: "T-106", class: null, sub: "Hindi" },
-        { name: "Kabir Das", mobile: "9876543216", code: "T-107", class: null, sub: "Physics" },
-        { name: "Sarah Jones", mobile: "9876543217", code: "T-108", class: null, sub: "Chemistry" },
-        { name: "Rahul Dravid", mobile: "9876543218", code: "T-109", class: null, sub: "Biology" },
-        { name: "Zoya Khan", mobile: "9876543219", code: "T-110", class: null, sub: "Computer Science" }
+        // 6 Class Teachers (will be assigned to classes index 0-5)
+        { name: "Priya Sharma", mobile: "9876543210", code: "T-101", sub: "Mathematics" },
+        { name: "Rohan Verma", mobile: "9876543211", code: "T-102", sub: "Science" },
+        { name: "Anjali Gupta", mobile: "9876543212", code: "T-103", sub: "English" },
+        { name: "Suresh Raina", mobile: "9876543213", code: "T-104", sub: "History" },
+        { name: "Vikram Rathore", mobile: "9876543214", code: "T-105", sub: "Geography" },
+        { name: "Meera Bai", mobile: "9876543215", code: "T-106", sub: "Hindi" },
+        
+        // 4 Subject Teachers (No class teachership)
+        { name: "Kabir Das", mobile: "9876543216", code: "T-107", sub: "Physics" },
+        { name: "Sarah Jones", mobile: "9876543217", code: "T-108", sub: "Chemistry" },
+        { name: "Rahul Dravid", mobile: "9876543218", code: "T-109", sub: "Biology" },
+        { name: "Zoya Khan", mobile: "9876543219", code: "T-110", sub: "Computer Science" }
     ];
 
     const teacherDocs = [];
-    for (const t of teacherSpecs) {
+
+    for (let i = 0; i < teacherSpecs.length; i++) {
+        const t = teacherSpecs[i];
+        
+        // First 6 teachers get a class, remaining 4 get null
+        const assignedClass = i < 6 ? classes[i] : null; 
+
         const rawPass = generatePassword(t.name, t.mobile);
         const hashedPass = await bcrypt.hash(rawPass, 10);
-        // Initially create teachers without assignments (we will add them dynamically)
+
         const newTeacher = await Teacher.create({
             name: t.name,
             mobile: t.mobile,
             teacherCode: t.code,
             password: hashedPass,
-            classTeachership: t.class,
+            classTeachership: assignedClass, 
             assignments: [] 
         });
+
         teacherDocs.push(newTeacher);
-        teacherExcelData.push({ Name: t.name, Mobile: t.mobile, Code: t.code, Role: t.class ? "Class Teacher" : "Subject Teacher", Password: rawPass });
+        
+        teacherExcelData.push({ 
+            Name: t.name, 
+            Mobile: t.mobile, 
+            Code: t.code, 
+            Subject: t.sub,
+            Role: assignedClass ? `Class Teacher (${assignedClass})` : "Subject Teacher", 
+            Password: rawPass 
+        });
     }
 
-    // --- 2. DYNAMIC ACADEMIC SETUP (5 TEACHERS PER CLASS) ---
-    console.log("📚 Assigning 5 Random Teachers to each Class...");
-    const classes = ["8-A", "8-B", "9-A", "9-B", "10-A", "10-B"];
-    const classAssignments = {}; // Stores which teachers are in which class
-    const examMap = {}; // key: className_teacherId_type, value: assignmentId
+    // --- 2. ASSIGN TEACHERS TO CLASSES (MIN 4 PER CLASS) ---
+    console.log("📚 Assigning Subject Allocations...");
 
     for (const className of classes) {
-        const selectedTeachers = getRandomTeachers(teacherDocs, 5); // Pick only 5
-        classAssignments[className] = selectedTeachers;
+        // 1. Identify the Class Teacher for this class (if any)
+        const classTeacher = teacherDocs.find(t => t.classTeachership === className);
+        
+        // 2. Filter out the class teacher from the pool to pick random additional ones
+        const otherTeachers = teacherDocs.filter(t => t._id.toString() !== classTeacher._id.toString());
+        
+        // 3. Shuffle and pick 3 additional teachers
+        const additionalTeachers = otherTeachers.sort(() => 0.5 - Math.random()).slice(0, 3);
+        
+        // 4. Combine them (1 Class Teacher + 3 Subject Teachers = 4 Teachers)
+        const facultyForClass = [classTeacher, ...additionalTeachers];
 
-        for (const teacher of selectedTeachers) {
-            const subject = teacherSpecs.find(s => s.code === teacher.teacherCode).sub;
-
-            // Update Teacher's assignments array in DB
+        // 5. Update DB Records
+        for (const teacher of facultyForClass) {
+            const originalSpec = teacherSpecs.find(s => s.code === teacher.teacherCode);
+            
+            // Add to Teacher's assignment list
             await Teacher.findByIdAndUpdate(teacher._id, {
-                $push: { assignments: { class: className, subject: subject } }
+                $push: { assignments: { class: className, subject: originalSpec.sub } }
             });
 
-            // Create Syllabus
+            // Create Syllabus entry
             await Syllabus.create({
                 teacher: teacher._id,
                 className,
-                subject,
-                chapters: [{ chapterNo: 1, title: "Introduction", isCurrent: true }]
+                subject: originalSpec.sub,
+                chapters: [
+                    { chapterNo: 1, title: "Introduction to " + originalSpec.sub, isCurrent: true, notesStatus: "Pending", quizStatus: "Pending" }
+                ]
             });
-
-            // Create Unit Exam
-            const uExam = await Assignment.create({
-                teacher: teacher._id, className, subject, title: "Unit Exam 2", type: "exam", totalMarks: 25, status: "Completed", dueDate: new Date()
-            });
-            // Create Term Exam
-            const tExam = await Assignment.create({
-                teacher: teacher._id, className, subject, title: "Term Exam 1", type: "exam", totalMarks: 50, status: "Completed", dueDate: new Date()
-            });
-
-            examMap[`${className}_${teacher._id}_Unit`] = uExam._id;
-            examMap[`${className}_${teacher._id}_Term`] = tExam._id;
         }
     }
 
-    // --- 3. CREATE STUDENTS & MARKS ---
-    console.log("🎓 Creating Students & Injecting Marks...");
+    // --- 3. CREATE STUDENTS (5 PER CLASS) ---
+    console.log("🎓 Creating 30 Students (5 per class)...");
+    
     const studentNames = [
         "Arjun", "Diya", "Rohan", "Ananya", "Vikram", "Sana", "Ishaan", "Neha", "Rahul", "Simran",
         "Fatima", "Kabir", "Meera", "Aryan", "Sanya", "Pooja", "Karan", "Shruti", "Varun", "Ishaan",
@@ -136,60 +145,63 @@ const seedData = async () => {
     let grCounter = 2024001;
 
     for (const className of classes) {
-        const assignedTeachers = classAssignments[className];
-
         for (let i = 0; i < 5; i++) {
             const name = `${studentNames[studentIdx % studentNames.length]} ${['Kumar', 'Singh', 'Gupta', 'Roy'][Math.floor(Math.random() * 4)]}`;
             const mobile = `910000${grCounter.toString().slice(-4)}`;
             const grNumber = `GR-${grCounter}`;
             const rawPass = generatePassword(name, mobile);
             
-            const newStudent = await Student.create({
-                name, mobile, rollNo: (i + 1).toString(), grNumber, className,
+            await Student.create({
+                name, 
+                mobile, 
+                rollNo: (i + 1).toString(), 
+                grNumber, 
+                className,
                 password: await bcrypt.hash(rawPass, 10),
                 stats: { avgScore: 0 }
             });
 
-            studentExcelData.push({ Name: name, Class: className, Roll: i+1, GR: grNumber, Mobile: mobile, Password: rawPass });
+            // Keep track of class name in data object for filtering later
+            studentExcelData.push({ 
+                Name: name, 
+                Class: className, 
+                Roll: i+1, 
+                GR: grNumber, 
+                Mobile: mobile, 
+                Password: rawPass 
+            });
 
-            // Create Submissions ONLY for the 5 assigned teachers
-            for (const teacher of assignedTeachers) {
-                await Submission.create({
-                    student: newStudent._id,
-                    teacher: teacher._id,
-                    assignment: examMap[`${className}_${teacher._id}_Unit`],
-                    type: "exam",
-                    status: "Graded",
-                    obtainedMarks: getRandomScore(25),
-                    totalMarks: 25
-                });
-
-                await Submission.create({
-                    student: newStudent._id,
-                    teacher: teacher._id,
-                    assignment: examMap[`${className}_${teacher._id}_Term`],
-                    type: "exam",
-                    status: "Graded",
-                    obtainedMarks: getRandomScore(50),
-                    totalMarks: 50
-                });
-            }
             studentIdx++;
             grCounter++;
         }
     }
 
-    // --- 4. EXPORT EXCEL ---
+    // --- 4. EXPORT EXCEL (SEPARATE SHEETS) ---
     try {
-        const teacherSheet = XLSX.utils.json_to_sheet(teacherExcelData);
-        const studentSheet = XLSX.utils.json_to_sheet(studentExcelData);
         const wb = XLSX.utils.book_new();
+
+        // Sheet 1: Teachers
+        const teacherSheet = XLSX.utils.json_to_sheet(teacherExcelData);
         XLSX.utils.book_append_sheet(wb, teacherSheet, "Teachers");
-        XLSX.utils.book_append_sheet(wb, studentSheet, "Students");
+
+        // Sheet 2-N: Each Class gets its own sheet
+        for (const className of classes) {
+            // Filter students belonging to this class
+            const classStudents = studentExcelData.filter(s => s.Class === className);
+            
+            if (classStudents.length > 0) {
+                // Create a sheet for this specific class
+                const classSheet = XLSX.utils.json_to_sheet(classStudents);
+                XLSX.utils.book_append_sheet(wb, classSheet, className);
+            }
+        }
+
         XLSX.writeFile(wb, "SchoolData.xlsx");
-        console.log("✅ Data seeded. SchoolData.xlsx generated.");
+        console.log("✅ Data seeded successfully.");
+        console.log("📊 SchoolData.xlsx created with separate sheets for 'Teachers' and each Class.");
+
     } catch (e) { 
-        console.log("⚠️ Excel generation failed, but DB is seeded."); 
+        console.log("⚠️ Excel generation failed:", e.message); 
     }
 
     process.exit();

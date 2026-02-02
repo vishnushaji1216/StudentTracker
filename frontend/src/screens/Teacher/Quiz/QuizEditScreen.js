@@ -4,7 +4,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import FontAwesome5 from "react-native-vector-icons/FontAwesome5";
-import DateTimePicker from '@react-native-community/datetimepicker'; // <--- Ensure this is installed
+import DateTimePicker from '@react-native-community/datetimepicker'; 
 import api from "../../../services/api";
 
 export default function QuizEditScreen({ route, navigation }) {
@@ -17,7 +17,9 @@ export default function QuizEditScreen({ route, navigation }) {
   const [title, setTitle] = useState('');
   const [duration, setDuration] = useState('');
   const [passingScore, setPassingScore] = useState('');
-  const [status, setStatus] = useState(''); // To check if we can reschedule
+  
+  // --- NEW: Status State ---
+  const [targetStatus, setTargetStatus] = useState('Draft'); // Draft, Active, Scheduled
   
   // Schedule State
   const [scheduleDate, setScheduleDate] = useState(new Date());
@@ -43,7 +45,9 @@ export default function QuizEditScreen({ route, navigation }) {
       setTitle(q.title);
       setDuration(q.duration.toString());
       setPassingScore(q.passingScore ? q.passingScore.toString() : '40');
-      setStatus(q.status);
+      
+      // Initialize Status
+      setTargetStatus(q.status);
       
       if (q.scheduledAt) {
         setScheduleDate(new Date(q.scheduledAt));
@@ -58,55 +62,28 @@ export default function QuizEditScreen({ route, navigation }) {
     }
   };
 
-  // --- QUESTION HANDLERS ---
-
+  // --- QUESTION HANDLERS (Unchanged) ---
   const handleQuestionChange = (text, index) => {
-    const newQ = [...questions];
-    newQ[index].questionText = text;
-    setQuestions(newQ);
+    const newQ = [...questions]; newQ[index].questionText = text; setQuestions(newQ);
   };
-
   const handleOptionChange = (text, qIndex, optIndex) => {
-    const newQ = [...questions];
-    newQ[qIndex].options[optIndex] = text;
-    setQuestions(newQ);
+    const newQ = [...questions]; newQ[qIndex].options[optIndex] = text; setQuestions(newQ);
   };
-
   const handleCorrectAnswer = (qIndex, optIndex) => {
-    const newQ = [...questions];
-    newQ[qIndex].correctAnswer = optIndex;
-    setQuestions(newQ);
+    const newQ = [...questions]; newQ[qIndex].correctAnswer = optIndex; setQuestions(newQ);
   };
-
   const handleMarksChange = (text, index) => {
-    const newQ = [...questions];
-    newQ[index].marks = Number(text);
-    setQuestions(newQ);
+    const newQ = [...questions]; newQ[index].marks = Number(text); setQuestions(newQ);
   };
-
   const handleDeleteQuestion = (index) => {
-    // 1. Delete immediately (No Alert)
-    const newQ = questions.filter((_, i) => i !== index);
-    setQuestions(newQ);
-
+    const newQ = questions.filter((_, i) => i !== index); setQuestions(newQ);
     showToast("Question deleted", "error"); 
   };
-
   const handleAddQuestion = () => {
-    setQuestions([
-      ...questions,
-      {
-        questionText: "",
-        options: ["", "", "", ""],
-        correctAnswer: 0,
-        marks: 1
-      }
-    ]);
-    // Optional: Scroll to bottom
+    setQuestions([...questions, { questionText: "", options: ["", "", "", ""], correctAnswer: 0, marks: 1 }]);
   };
 
   // --- SCHEDULE HANDLERS ---
-
   const onChangeDate = (event, selectedDate) => {
     setShowDatePicker(false);
     if (selectedDate) {
@@ -126,7 +103,6 @@ export default function QuizEditScreen({ route, navigation }) {
   };
 
   // --- SAVE ---
-
   const showToast = (message, type = 'success') => {
     setToast({ visible: true, message, type });
     Animated.spring(toastAnim, { toValue: 0, useNativeDriver: true }).start();
@@ -135,11 +111,11 @@ export default function QuizEditScreen({ route, navigation }) {
     }, 2000);
   };
 
-  const handleSave = async (publish = false) => {
+  const handleSave = async () => {
     // Validation
+    if (!title.trim()) { showToast("Title is required", "error"); return; }
     if (questions.some(q => !q.questionText || q.options.some(o => !o))) {
-        showToast("Please fill all empty fields", "error");
-        return;
+        showToast("Please fill all empty fields", "error"); return;
     }
 
     setSaving(true);
@@ -149,14 +125,15 @@ export default function QuizEditScreen({ route, navigation }) {
         duration: Number(duration),
         passingScore: Number(passingScore),
         questions: questions,
-        status: publish ? 'Active' : undefined,
-        // Only send scheduledAt if it was a scheduled quiz
-        scheduledAt: status === 'Scheduled' ? scheduleDate : undefined 
+        // --- KEY CHANGE: Send the selected status ---
+        status: targetStatus, 
+        // Only send scheduledAt if status is Scheduled
+        scheduledAt: targetStatus === 'Scheduled' ? scheduleDate : undefined 
       };
 
       await api.put(`/teacher/quizzes/${quizId}`, payload);
       
-      showToast("Changes Saved Successfully!", "success");
+      showToast("Quiz Updated Successfully!", "success");
       setTimeout(() => navigation.goBack(), 1200);
 
     } catch (err) {
@@ -183,7 +160,7 @@ export default function QuizEditScreen({ route, navigation }) {
                 <FontAwesome5 name="arrow-left" size={20} color="#64748b"/>
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Edit Quiz</Text>
-            <TouchableOpacity onPress={() => handleSave(false)} disabled={saving}>
+            <TouchableOpacity onPress={handleSave} disabled={saving}>
                 {saving ? <ActivityIndicator size="small" color="#4f46e5"/> : <Text style={styles.saveText}>Save</Text>}
             </TouchableOpacity>
         </View>
@@ -209,10 +186,26 @@ export default function QuizEditScreen({ route, navigation }) {
                    </View>
                </View>
 
+               {/* --- NEW: STATUS SELECTOR --- */}
+               <Text style={[styles.label, {marginTop: 5}]}>Quiz Status</Text>
+               <View style={styles.statusRow}>
+                  {['Draft', 'Active', 'Scheduled'].map((opt) => (
+                    <TouchableOpacity 
+                        key={opt}
+                        style={[styles.statusBtn, targetStatus === opt && styles.statusBtnActive]}
+                        onPress={() => setTargetStatus(opt)}
+                    >
+                        <Text style={[styles.statusBtnText, targetStatus === opt && styles.statusBtnTextActive]}>
+                            {opt === 'Active' ? 'Live Now' : opt}
+                        </Text>
+                    </TouchableOpacity>
+                  ))}
+               </View>
+
                {/* Reschedule Section (Only if Scheduled) */}
-               {status === 'Scheduled' && (
-                 <View style={{marginTop: 10}}>
-                    <Text style={[styles.label, {color:'#d97706'}]}>Reschedule Launch</Text>
+               {targetStatus === 'Scheduled' && (
+                 <View style={{marginTop: 15, padding: 10, backgroundColor: '#fff7ed', borderRadius: 8, borderWidth: 1, borderColor: '#fed7aa'}}>
+                    <Text style={[styles.label, {color:'#c2410c', marginBottom: 8}]}>Schedule Launch Time</Text>
                     <View style={styles.row}>
                         <TouchableOpacity style={styles.pickerBtn} onPress={() => setShowDatePicker(true)}>
                             <FontAwesome5 name="calendar-alt" size={14} color="#64748b" />
@@ -228,14 +221,13 @@ export default function QuizEditScreen({ route, navigation }) {
                )}
            </View>
 
-           {/* Questions List */}
+           {/* Questions List (Unchanged) */}
            <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom: 10}}>
               <Text style={styles.sectionTitle}>QUESTIONS ({questions.length})</Text>
            </View>
            
            {questions.map((q, qIndex) => (
                <View key={qIndex} style={styles.qCard}>
-                   {/* Question Header */}
                    <View style={styles.qHeader}>
                        <Text style={styles.qIndex}>Q{qIndex + 1}</Text>
                        <View style={{flexDirection:'row', gap: 10, alignItems:'center'}}>
@@ -254,7 +246,6 @@ export default function QuizEditScreen({ route, navigation }) {
                        </View>
                    </View>
                    
-                   {/* Question Text */}
                    <TextInput 
                      style={styles.qInput} 
                      value={q.questionText} 
@@ -263,7 +254,6 @@ export default function QuizEditScreen({ route, navigation }) {
                      onChangeText={(text) => handleQuestionChange(text, qIndex)}
                    />
                    
-                   {/* Editable Options */}
                    <View style={styles.optContainer}>
                        {q.options.map((opt, optIndex) => (
                            <View key={optIndex} style={styles.optRow}>
@@ -285,7 +275,6 @@ export default function QuizEditScreen({ route, navigation }) {
                </View>
            ))}
 
-           {/* Add Question Button */}
            <TouchableOpacity style={styles.addBtn} onPress={handleAddQuestion}>
                <FontAwesome5 name="plus" size={14} color="#4f46e5" />
                <Text style={styles.addBtnText}>Add New Question</Text>
@@ -327,6 +316,13 @@ const styles = StyleSheet.create({
   input: { backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#e2e8f0', padding: 10, borderRadius: 8, marginBottom: 15, fontWeight: '600', color: '#1e293b' },
   row: { flexDirection: 'row' },
   
+  // Status Selector Styles
+  statusRow: { flexDirection: 'row', backgroundColor: '#f1f5f9', padding: 4, borderRadius: 8, marginBottom: 15 },
+  statusBtn: { flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: 6 },
+  statusBtnActive: { backgroundColor: '#fff', shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 2, elevation: 1 },
+  statusBtnText: { fontSize: 12, fontWeight: '600', color: '#64748b' },
+  statusBtnTextActive: { color: '#4f46e5', fontWeight: 'bold' },
+
   // Picker Styles
   pickerBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#fff', borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 8, padding: 12 },
   pickerText: { fontWeight: 'bold', color: '#1e293b' },

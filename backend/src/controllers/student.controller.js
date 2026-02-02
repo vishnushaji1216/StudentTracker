@@ -116,91 +116,127 @@ export const getStudentProfile = async (req, res) => {
 // --- STATS (UPDATED FOR UNIFIED GRADEBOOK) ---
 
 export const getStudentStats = async (req, res) => {
-    try {
-      const studentId = req.user.id;
-  
-      // 1. Fetch All Graded Submissions (Populate BOTH Assignment and Quiz)
-      const submissions = await Submission.find({ 
-        student: studentId, 
-        status: 'Graded' 
-      })
-      .populate('assignment', 'title subject')
-      .populate('quiz', 'title'); // Quiz might not have subject yet
-  
-      if (submissions.length === 0) {
-        return res.json({ overall: 0, graphData: [], subjectPerformance: [] });
-      }
-  
-      let totalObtained = 0;
-      let totalPossible = 0;
-      const subjectMap = {}; 
-  
-      const graphData = submissions.map(sub => {
-        // A. Use Snapshot Data (Reliable!)
-        const obtained = sub.obtainedMarks || 0;
-        const total = sub.totalMarks || 100; // Use the snapshot total!
-        
-        // B. Determine Title & Subject dynamically
-        let title = "Unknown Task";
-        let subject = "General";
+  try {
+    const studentId = req.user.id;
+    
+    // 1. Get Student Info (for Class Name)
+    const student = await Student.findById(studentId);
+    if (!student) return res.status(404).json({ message: "Student not found" });
 
-        if (sub.type === 'quiz' && sub.quiz) {
-            title = sub.quiz.title;
-            subject = "Quiz"; // Or fetch from quiz if you add subject field later
-        } else if (sub.assignment) {
-            title = sub.assignment.title;
-            subject = sub.assignment.subject;
-        } else if (sub.type === 'exam') {
-             // For manually entered exams via Gradebook
-             // The assignment link exists but acts as a header
-             title = sub.assignment?.title || "Exam";
-             subject = sub.assignment?.subject || "General";
-        }
-  
-        // C. Aggregate Logic
-        totalObtained += obtained;
-        totalPossible += total;
-  
-        if (!subjectMap[subject]) subjectMap[subject] = { obtained: 0, total: 0 };
-        subjectMap[subject].obtained += obtained;
-        subjectMap[subject].total += total;
-  
-        return {
-          label: title.substring(0, 10) + "...",
-          score: total > 0 ? Math.round((obtained / total) * 100) : 0
-        };
-      });
-  
-      // D. Format Cards
-      const subjectPerformance = Object.keys(subjectMap).map(subj => {
-        const data = subjectMap[subj];
-        const percent = data.total > 0 ? Math.round((data.obtained / data.total) * 100) : 0;
-        
-        let grade = 'F';
-        if (percent >= 90) grade = 'A+';
-        else if (percent >= 80) grade = 'A';
-        else if (percent >= 70) grade = 'B';
-        else if (percent >= 50) grade = 'C';
-  
-        return {
-          subject: subj,
-          score: percent + "%",
-          grade: `GRADE ${grade}`
-        };
-      });
-  
-      const overallAvg = totalPossible > 0 ? Math.round((totalObtained / totalPossible) * 100) : 0;
-  
-      res.json({
-        overall: overallAvg + "%",
-        graphData: graphData.slice(-5), 
-        subjectPerformance
-      });
-  
-    } catch (error) {
-      console.error("Stats Error:", error);
-      res.status(500).json({ message: "Failed to load stats" });
+    // 2. Fetch All Graded Submissions for this Student
+    const mySubmissions = await Submission.find({ 
+      student: studentId, 
+      status: 'Graded' 
+    })
+    .populate('assignment', 'title subject className') // Get ClassName to filter logic
+    .populate('quiz', 'title')
+    .sort({ updatedAt: -1 }); // Newest first for "Recent Work"
+
+    if (mySubmissions.length === 0) {
+      return res.json({ overall: 0, classAvg: 0, graphData: [], subjectPerformance: [], recentHistory: [] });
     }
+
+    // --- A. Calculate Student Stats ---
+    let totalObtained = 0;
+    let totalPossible = 0;
+    const subjectMap = {}; 
+
+    const recentHistory = mySubmissions.slice(0, 5).map(sub => {
+       const obtained = sub.obtainedMarks || 0;
+       const total = sub.totalMarks || 100;
+       let title = "Task";
+       let subject = "General";
+
+       if (sub.type === 'quiz' && sub.quiz) {
+          title = sub.quiz.title;
+          subject = "Quiz";
+       } else if (sub.assignment) {
+          title = sub.assignment.title;
+          subject = sub.assignment.subject;
+       }
+
+       return {
+           id: sub._id,
+           date: new Date(sub.updatedAt).toLocaleDateString(),
+           title: `${subject}: ${title}`,
+           score: `${obtained}/${total}`,
+           isHigh: (obtained/total) >= 0.7
+       };
+    });
+
+    // Aggregate for Graphs & Subjects
+    const graphData = mySubmissions.slice(0, 5).reverse().map(sub => {
+      const obtained = sub.obtainedMarks || 0;
+      const total = sub.totalMarks || 100;
+      totalObtained += obtained;
+      totalPossible += total;
+
+      let subject = sub.assignment?.subject || "General";
+      if (sub.type === 'quiz') subject = "Quiz";
+
+      // Group by Subject
+      if (!subjectMap[subject]) subjectMap[subject] = { obtained: 0, total: 0 };
+      subjectMap[subject].obtained += obtained;
+      subjectMap[subject].total += total;
+
+      return {
+        label: (sub.assignment?.title || sub.quiz?.title || "Task").substring(0, 5),
+        score: total > 0 ? Math.round((obtained / total) * 100) : 0
+      };
+    });
+
+    const overallAvg = totalPossible > 0 ? Math.round((totalObtained / totalPossible) * 100) : 0;
+
+    // --- B. Calculate Class Average (New!) ---
+    // We look for all assignments belonging to this class, then average their submissions
+    // Note: This is a simple approximation. For large datasets, use MongoDB aggregation.
+    const classAssignments = await Assignment.find({ className: student.className });
+    const classAssignIds = classAssignments.map(a => a._id);
+    
+    const classSubmissions = await Submission.find({ 
+        assignment: { $in: classAssignIds },
+        status: 'Graded'
+    });
+
+    let classTotalObt = 0;
+    let classTotalPos = 0;
+    classSubmissions.forEach(sub => {
+        classTotalObt += (sub.obtainedMarks || 0);
+        classTotalPos += (sub.totalMarks || 100);
+    });
+
+    const classAvg = classTotalPos > 0 ? Math.round((classTotalObt / classTotalPos) * 100) : 0;
+
+    // --- C. Format Subject Cards ---
+    const subjectPerformance = Object.keys(subjectMap).map(subj => {
+      const data = subjectMap[subj];
+      const percent = data.total > 0 ? Math.round((data.obtained / data.total) * 100) : 0;
+      
+      let grade = 'F';
+      if (percent >= 90) grade = 'A+';
+      else if (percent >= 80) grade = 'A';
+      else if (percent >= 70) grade = 'B';
+      else if (percent >= 50) grade = 'C';
+
+      return {
+        subject: subj,
+        score: percent + "%",
+        grade: `GRADE ${grade}`
+      };
+    });
+
+    res.json({
+      overall: overallAvg, // Send as number for comparison logic
+      classAvg: classAvg,
+      graphData, 
+      subjectPerformance,
+      recentHistory
+    });
+
+  } catch (error) {
+    console.error("Stats Error:", error);
+    res.status(500).json({ message: "Failed to load stats" });
+  }
 };
 
 // --- FILE UPLOAD (HOMEWORK) ---

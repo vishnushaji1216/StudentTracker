@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Search, User, BookOpen, Star, Phone } from 'lucide-react';
 import api from '../services/api';
 
-const CLASS_OPTIONS = ["9-A", "9-B", "10-A", "10-B", "11-Science", "11-Commerce"];
+const CLASS_OPTIONS = ["8-A","8-B", "9-A", "9-B", "10-A", "10-B"];
 
 const Registry = () => {
   const navigate = useNavigate();
