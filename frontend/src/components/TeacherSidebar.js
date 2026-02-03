@@ -168,7 +168,7 @@ export default function TeacherSidebar({ isOpen, onClose, navigation, activeItem
                 icon="clipboard-list" 
                 label="Gradebook" 
                 onPress={() => handleNav('TeacherGradebook')}
-                active={activeItem === 'Gradebook'}
+                active={activeItem === 'TeacherGradebook'}
               />
               <SidebarItem 
                 icon="list-ul" 

@@ -49,14 +49,11 @@ export const getMyClasses = async (req, res) => {
       return stat ? stat.count : 0;
     };
 
-    // 4. Build Class Cards (With Subject-Specific Avg)
     const classesData = await Promise.all(assignedClasses.map(async (assign) => {
       // A. Syllabus Status
       const syllabusDoc = await Syllabus.findOne({ teacher: teacherId, className: assign.class, subject: assign.subject });
       const currentChapter = syllabusDoc?.chapters.find(ch => ch.isCurrent);
 
-      // B. CALCULATE SUBJECT-SPECIFIC AVERAGE (NEW LOGIC)
-      // Find assignments for THIS class, THIS subject, by THIS teacher
       const assignments = await Assignment.find({ 
         teacher: teacherId,
         className: assign.class,
@@ -66,7 +63,6 @@ export const getMyClasses = async (req, res) => {
 
       const assignmentIds = assignments.map(a => a._id);
 
-      // Find graded submissions for these assignments
       const submissions = await Submission.find({
         assignment: { $in: assignmentIds },
         status: 'Graded'
@@ -77,7 +73,6 @@ export const getMyClasses = async (req, res) => {
 
       submissions.forEach(sub => {
         totalObtained += sub.obtainedMarks;
-        // Use snapshot totalMarks from submission if available, otherwise fallback to assignment
         const parentAssign = assignments.find(a => a._id.toString() === sub.assignment.toString());
         const maxMarks = sub.totalMarks || parentAssign?.totalMarks || 100;
         
@@ -400,13 +395,18 @@ export const postNotice = async (req, res) => {
     const teacherId = req.user.id;
     const teacher = await Teacher.findById(teacherId);
 
+    const daysToLive = isUrgent ? 14 : 7;
+    const expirationDate = new Date();
+    expirationDate.setDate(expirationDate.getDate() + daysToLive);
+
     const newAnnouncement = new Announcement({
       sender: { role: 'teacher', id: teacherId.toString(), name: teacher.name },
       targetAudience: target, 
       targetClass, 
       title, 
       message, 
-      isUrgent: isUrgent || false
+      isUrgent: isUrgent || false,
+      expiresAt: expirationDate
     });
 
     await newAnnouncement.save();
@@ -735,5 +735,42 @@ export const getStudentReport = async (req, res) => {
   } catch (error) {
     console.error("Student Report Error:", error);
     res.status(500).json({ message: "Failed to generate student report" });
+  }
+};
+
+export const getClassSubjects = async (req, res) => {
+  try {
+    const { className } = req.query;
+
+    if (!className) {
+      return res.status(400).json({ message: "Class name is required" });
+    }
+
+    const teachers = await Teacher.find({ 
+      "assignments.class": className 
+    });
+
+    const subjectsSet = new Set();
+
+    teachers.forEach(teacher => {
+      // A teacher might teach multiple classes, so we must filter the assignments array
+      teacher.assignments.forEach(assign => {
+        if (assign.class === className && assign.subject) {
+          subjectsSet.add(assign.subject);
+        }
+      });
+    });
+
+    const subjects = Array.from(subjectsSet).sort();
+
+    if (subjects.length === 0) {
+        return res.json(["Mathematics", "Science", "English", "Social Science", "Hindi", "Computer", "Marathi", "GK"]);
+    }
+
+    res.json(subjects);
+
+  } catch (error) {
+    console.error("Error fetching class subjects:", error);
+    res.status(500).json({ message: "Failed to fetch subjects" });
   }
 };

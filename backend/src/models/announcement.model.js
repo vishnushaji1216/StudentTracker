@@ -2,9 +2,9 @@ import mongoose from 'mongoose';
 
 const AnnouncementSchema = new mongoose.Schema({
   sender: { 
-    role: { type: String, required: true }, // 'admin' or 'teacher'
-    id: { type: String, required: true },   // String to support 'admin_master' and ObjectIds
-    name: { type: String }                  // Stores "Priya Sharma" for easy display
+    role: { type: String, required: true }, 
+    id: { type: String, required: true },   
+    name: { type: String }                  
   },
   targetAudience: { 
     type: String, 
@@ -13,7 +13,7 @@ const AnnouncementSchema = new mongoose.Schema({
   },
   targetClass: { 
     type: String, 
-    default: null // e.g., "9-A" (Used when targetAudience is 'Class')
+    default: null 
   },
   title: { 
     type: String, 
@@ -30,7 +30,12 @@ const AnnouncementSchema = new mongoose.Schema({
   createdAt: { 
     type: Date, 
     default: Date.now 
-  }
-});
+  },
+  expiresAt: {
+    type: Date, 
+    required: true, 
+    index: { expires: 0 }
+  }}, { timestamps: true }
+);
 
 export default mongoose.model('Announcement', AnnouncementSchema);

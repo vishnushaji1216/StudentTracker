@@ -126,7 +126,7 @@ export default function App() {
         <Stack.Screen name="DailyTask" component={DailyTaskScreen} />
         <Stack.Screen name="NoticeBoard" component={NoticeBoardScreen} />
         <Stack.Screen name="ResourceLibrary" component={ResourceLibraryScreen} />
-        <Stack.Screen name="Gradebook" component={TeacherGradebookScreen} />
+        <Stack.Screen name="TeacherGradebook" component={TeacherGradebookScreen} />
 
         {/* Quiz */}
         <Stack.Screen name="QuizDashboard" component={QuizDashboardScreen} />

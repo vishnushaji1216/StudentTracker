@@ -254,12 +254,17 @@ export const sendBroadcast = async (req, res) => {
       throw new Error("Announcement Model is not loaded! Check imports.");
     }
 
+    const daysToLive = isUrgent ? 14 : 7;
+    const expirationDate = new Date();
+    expirationDate.setDate(expirationDate.getDate() + daysToLive);
+
     const newAnnouncement = new Announcement({
       targetAudience: target,
       title: subject,
       message,
       isUrgent: isUrgent || false,
-      sender: { role: 'admin', id: req.user?.id } // Safe access to ID
+      sender: { role: 'admin', id: req.user?.id }, // Safe access to ID
+      expiresAt: expirationDate
     });
 
     await newAnnouncement.save();
