@@ -1,269 +1,235 @@
 import React, { useState, useRef } from "react";
 import { 
-  View, 
-  Text, 
-  TextInput, 
-  TouchableOpacity, 
-  StyleSheet, 
-  ScrollView, 
-  Animated, 
-  ActivityIndicator,
-  Alert
+  View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, 
+  ActivityIndicator, Alert, Animated 
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import FontAwesome5 from "react-native-vector-icons/FontAwesome5";
 import api from "../../../services/api";
 
 export default function QuestionBuilderScreen({ route, navigation }) {
+  // 1. Get Setup Data
   const { setupData } = route.params;
+  
+  // --- SEPARATE LOADING STATES ---
+  const [draftLoading, setDraftLoading] = useState(false);
+  const [publishLoading, setPublishLoading] = useState(false);
+  
+  // 2. Initialize Questions
+  const [questions, setQuestions] = useState([
+    { questionText: "", options: ["", "", "", ""], correctAnswer: 0, marks: 1 }
+  ]);
 
-  // Toast State
   const [toast, setToast] = useState({ visible: false, message: '', type: 'success' });
   const toastAnim = useRef(new Animated.Value(100)).current; 
 
-  // Questions State
-  const [questions, setQuestions] = useState([]);
-  const [loading, setLoading] = useState(false);
-
-  // Current Question Input State
-  const [qText, setQText] = useState('');
-  const [options, setOptions] = useState(['', '', '', '']);
-  const [correctIdx, setCorrectIdx] = useState(0); 
-  const [marks, setMarks] = useState('1');
-
-  // --- TOAST FUNCTION ---
-  const showToast = (message, type = 'success') => {
-    setToast({ visible: true, message, type });
-    Animated.spring(toastAnim, { toValue: 0, useNativeDriver: true, friction: 8 }).start();
-    
-    // Auto Hide
-    setTimeout(() => {
-      Animated.timing(toastAnim, { toValue: 100, duration: 300, useNativeDriver: true }).start(() => {
-        setToast(prev => ({ ...prev, visible: false }));
-      });
-    }, 2000);
+  // --- HANDLERS (Unchanged) ---
+  const handleQuestionChange = (text, index) => {
+    const newQ = [...questions];
+    newQ[index].questionText = text;
+    setQuestions(newQ);
   };
 
-  const addQuestion = () => {
-    // Validation using Toast
-    if (!qText.trim()) {
-        showToast("Please enter a question text", "error");
-        return;
-    }
-    if (options.some(o => !o.trim())) {
-        showToast("Please fill all 4 options", "error");
-        return;
-    }
-
-    const newQ = {
-      questionText: qText,
-      options: [...options],
-      correctAnswer: correctIdx,
-      marks: parseInt(marks) || 1
-    };
-
-    setQuestions([...questions, newQ]);
-
-    // Reset Form
-    setQText('');
-    setOptions(['', '', '', '']);
-    setCorrectIdx(0);
-    setMarks('1');
-    
-    // Optional: Small success feedback for adding
-    // showToast("Question Added", "success"); 
+  const handleOptionChange = (text, qIndex, optIndex) => {
+    const newQ = [...questions];
+    newQ[qIndex].options[optIndex] = text;
+    setQuestions(newQ);
   };
 
-  const handleOptionChange = (text, index) => {
-    const newOpts = [...options];
-    newOpts[index] = text;
-    setOptions(newOpts);
+  const handleCorrectAnswer = (qIndex, optIndex) => {
+    const newQ = [...questions];
+    newQ[qIndex].correctAnswer = optIndex;
+    setQuestions(newQ);
   };
 
-  const handlePublish = async () => {
-    // 1. Check current input status
-    const isCurrentQuestionEmpty = !qText.trim() && options.every(o => !o.trim());
-    const isCurrentQuestionComplete = qText.trim() && options.every(o => o.trim());
-    
-    let finalQuestions = [...questions];
+  const handleMarksChange = (text, index) => {
+    const newQ = [...questions];
+    newQ[index].marks = text.replace(/[^0-9]/g, ''); 
+    setQuestions(newQ);
+  };
 
-    // 2. Logic to Handle "Pending" Question
-    if (!isCurrentQuestionEmpty) {
-        if (isCurrentQuestionComplete) {
-            // Auto-add the current question
-            finalQuestions.push({
-                questionText: qText,
-                options: [...options],
-                correctAnswer: correctIdx,
-                marks: parseInt(marks) || 1
-            });
-        } else {
-            // Alert user to fix the partial data
-            showToast("Please complete the current question or clear it.", "error");
-            return; 
+  const handleDeleteQuestion = (index) => {
+    if (questions.length === 1) return;
+    const newQ = questions.filter((_, i) => i !== index);
+    setQuestions(newQ);
+  };
+
+  const handleAddQuestion = () => {
+    setQuestions([
+      ...questions,
+      { questionText: "", options: ["", "", "", ""], correctAnswer: 0, marks: 1 }
+    ]);
+  };
+
+  // --- SUBMIT LOGIC (FIXED) ---
+  const handleSubmit = async (isDraftRequest = false) => {
+    // 1. Validation (Only strictly validate if Publishing)
+    if (!isDraftRequest) {
+        const isValid = questions.every(q => q.questionText.trim() && q.options.every(opt => opt.trim()));
+        if (!isValid) {
+            showToast("Please fill all fields to publish", "error");
+            return;
         }
     }
 
-    // 3. Final Check
-    if (finalQuestions.length === 0) {
-        showToast("Add at least one question first!", "error");
-        return;
-    }
+    // 2. Set Specific Loading State
+    if (isDraftRequest) setDraftLoading(true);
+    else setPublishLoading(true);
 
-    // 4. Proceed to API
-    setLoading(true);
     try {
-      const payload = {
-        ...setupData,
-        questions: finalQuestions // Use the updated list
-      };
+        let finalStatus = 'Draft';
+        let finalReleaseType = setupData.releaseType;
 
-      await api.post('/teacher/quizzes', payload);
-      
-      showToast("Quiz Published Successfully!", "success");
-      setTimeout(() => {
-          navigation.navigate('QuizDashboard');
-      }, 1500);
+        if (isDraftRequest) {
+            finalStatus = 'Draft';
+            // OPTIONAL: Force releaseType to 'Later' or undefined for drafts 
+            // to prevent backend from auto-activating based on 'Now'.
+            finalReleaseType = undefined; 
+        } else {
+            // Publishing Logic
+            if (setupData.releaseType === 'Later') {
+                finalStatus = 'Scheduled';
+            } else {
+                finalStatus = 'Active';
+            }
+        }
+
+        const payload = {
+            ...setupData,
+            releaseType: finalReleaseType, // Override setupData's releaseType
+            questions: questions.map(q => ({ ...q, marks: Number(q.marks) || 1 })),
+            status: finalStatus
+        };
+
+        // console.log("Sending Payload:", payload); // Debug if needed
+
+        await api.post('/teacher/quizzes', payload);
+        
+        const successMsg = isDraftRequest ? "Saved to Drafts!" : "Quiz Published!";
+        showToast(successMsg, "success");
+        
+        setTimeout(() => navigation.popToTop(), 1500);
 
     } catch (error) {
-      console.error("Publish Error:", error);
-      showToast("Failed to publish quiz", "error");
+        console.error(error);
+        showToast("Failed to save quiz", "error");
     } finally {
-        setLoading(false);
+        setDraftLoading(false);
+        setPublishLoading(false);
     }
   };
 
-  const handleDraft = async () => {
-    setLoading(true);
-    try {
-      const payload = {
-        ...setupData,
-        questions:questions,
-        isDraft: true
-      };
-
-      await api.post('/teacher/quizzes', payload);
-      showToast("Saved as Draft", "info");
-      setTimeout(() => navigation.navigate('QuizDashboard'), 1000);
-
-    } catch (error) {
-      showToast("Failed to save draft", "error");
-    } finally {
-      setLoading(false);
-    }
+  const showToast = (message, type = 'success') => {
+    setToast({ visible: true, message, type });
+    Animated.spring(toastAnim, { toValue: 0, useNativeDriver: true }).start();
+    setTimeout(() => {
+      Animated.timing(toastAnim, { toValue: 100, duration: 300, useNativeDriver: true }).start(() => setToast(prev => ({ ...prev, visible: false })));
+    }, 2000);
   };
+
+  const anyLoading = draftLoading || publishLoading;
 
   return (
     <View style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        
-        {/* Header */}
+      <SafeAreaView style={{ flex: 1 }}>
         <View style={styles.header}>
-           {/* Title Section - Uses flex:1 to shrink if needed */}
-           <View style={{ flex: 1, paddingRight: 10 }}>
-             <Text style={styles.headerTitle} numberOfLines={1}>Add Questions</Text>
-             <Text style={styles.headerSub} numberOfLines={1}>
-               {questions.length} Added • {questions.reduce((sum, q) => sum + q.marks, 0)} Marks
-             </Text>
-           </View>
-           
-           {/* Buttons Section - Fixed width, doesn't shrink */}
-           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-               
-               {/* 1. Draft Button (Icon Only) */}
-               <TouchableOpacity 
-                  style={styles.iconBtn} 
-                  onPress={handleDraft} 
-                  disabled={loading}
-               >
-                  <FontAwesome5 name="save" size={20} color="#64748b" />
-               </TouchableOpacity>
-
-               {/* 2. Publish Button (Text) */}
-               <TouchableOpacity 
-                  style={styles.publishBtn} 
-                  onPress={handlePublish} 
-                  disabled={loading}
-               >
-                  {loading ? (
-                    <ActivityIndicator color="#fff" size="small" />
-                  ) : (
-                    <Text style={styles.publishText}>Publish</Text>
-                  )}
-               </TouchableOpacity>
-           </View>
+            <TouchableOpacity onPress={() => navigation.goBack()} disabled={anyLoading}>
+                <FontAwesome5 name="arrow-left" size={20} color="#64748b"/>
+            </TouchableOpacity>
+            <View>
+                <Text style={styles.headerTitle}>Add Questions</Text>
+                <Text style={styles.headerSub}>{setupData.title}</Text>
+            </View>
+            <View style={{width: 20}}/>
         </View>
-
-        <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 100 }}>
-          
-          {/* Question Input Card */}
-          <View style={styles.card}>
-             <View style={styles.row}>
-                <Text style={styles.qCount}>Question {questions.length + 1}</Text>
-                <View style={styles.markInputBox}>
-                   <Text style={styles.markLabel}>Marks:</Text>
-                   <TextInput style={styles.markInput} keyboardType="numeric" value={marks} onChangeText={setMarks} />
-                </View>
-             </View>
-             
-             <TextInput 
-                style={styles.qInput} 
-                placeholder="Enter question text here..." 
-                multiline 
-                value={qText} 
-                onChangeText={setQText} 
-             />
-
-             {/* Options */}
-             {options.map((opt, idx) => (
-               <View key={idx} style={styles.optRow}>
-                  <TouchableOpacity style={styles.radio} onPress={() => setCorrectIdx(idx)}>
-                     <View style={[styles.radioDot, correctIdx === idx && styles.radioActive]} />
-                  </TouchableOpacity>
-                  <TextInput 
-                     style={[styles.optInput, correctIdx === idx && styles.optInputActive]}
-                     placeholder={`Option ${String.fromCharCode(65 + idx)}`}
-                     value={opt}
-                     onChangeText={(t) => handleOptionChange(t, idx)}
-                  />
+        
+        <ScrollView contentContainerStyle={{padding: 20, paddingBottom: 120}}>
+           {questions.map((q, qIndex) => (
+               <View key={qIndex} style={styles.qCard}>
+                   <View style={styles.qHeader}>
+                       <Text style={styles.qIndex}>Question {qIndex + 1}</Text>
+                       <View style={{flexDirection:'row', gap: 10, alignItems:'center'}}>
+                           <View style={styles.markBox}>
+                               <Text style={styles.markLabel}>Marks:</Text>
+                               <TextInput 
+                                   style={styles.markInput} 
+                                   value={q.marks.toString()} 
+                                   keyboardType="numeric"
+                                   onChangeText={(t) => handleMarksChange(t, qIndex)}
+                               />
+                           </View>
+                           <TouchableOpacity onPress={() => handleDeleteQuestion(qIndex)}>
+                               <FontAwesome5 name="trash" size={14} color="#ef4444" />
+                           </TouchableOpacity>
+                       </View>
+                   </View>
+                   <TextInput 
+                     style={styles.qInput} 
+                     value={q.questionText} 
+                     multiline
+                     placeholder="Type question here..."
+                     onChangeText={(text) => handleQuestionChange(text, qIndex)}
+                   />
+                   <View style={styles.optContainer}>
+                       {q.options.map((opt, optIndex) => (
+                           <View key={optIndex} style={styles.optRow}>
+                               <TouchableOpacity style={styles.radio} onPress={() => handleCorrectAnswer(qIndex, optIndex)}>
+                                  <View style={[styles.radioDot, q.correctAnswer === optIndex && styles.radioActive]} />
+                               </TouchableOpacity>
+                               <TextInput 
+                                  style={[styles.optInput, q.correctAnswer === optIndex && styles.optInputActive]}
+                                  value={opt}
+                                  placeholder={`Option ${String.fromCharCode(65+optIndex)}`}
+                                  onChangeText={(t) => handleOptionChange(t, qIndex, optIndex)}
+                               />
+                           </View>
+                       ))}
+                   </View>
                </View>
-             ))}
-
-             <TouchableOpacity style={styles.addBtn} onPress={addQuestion}>
-                <FontAwesome5 name="plus" size={12} color="#4f46e5" />
-                <Text style={styles.addBtnText}>Add Next Question</Text>
-             </TouchableOpacity>
-          </View>
-
-          {/* Preview List (Mini) */}
-          {questions.map((q, i) => (
-             <View key={i} style={styles.previewItem}>
-                <Text style={styles.previewText} numberOfLines={1}>{i + 1}. {q.questionText}</Text>
-                <Text style={styles.previewMarks}>{q.marks}m</Text>
-             </View>
-          ))}
-
+           ))}
+           <TouchableOpacity style={styles.addBtn} onPress={handleAddQuestion}>
+               <FontAwesome5 name="plus" size={14} color="#4f46e5" />
+               <Text style={styles.addBtnText}>Add New Question</Text>
+           </TouchableOpacity>
         </ScrollView>
 
-        {/* --- TOAST NOTIFICATION --- */}
+        <View style={styles.footer}>
+            {/* Draft Button */}
+            <TouchableOpacity 
+                style={[styles.footerBtn, styles.draftBtn]} 
+                onPress={() => handleSubmit(true)} 
+                disabled={anyLoading}
+            >
+                {draftLoading ? (
+                    <ActivityIndicator size="small" color="#475569" />
+                ) : (
+                    <Text style={styles.draftText}>Save Draft</Text>
+                )}
+            </TouchableOpacity>
+
+            {/* Publish Button */}
+            <TouchableOpacity 
+                style={[styles.footerBtn, styles.publishBtn]} 
+                onPress={() => handleSubmit(false)} 
+                disabled={anyLoading}
+            >
+                {publishLoading ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                    <>
+                        <Text style={styles.publishText}>Publish Quiz</Text>
+                        <FontAwesome5 name="check" size={14} color="#fff" />
+                    </>
+                )}
+            </TouchableOpacity>
+        </View>
+
         {toast.visible && (
-          <Animated.View 
-            style={[
-              styles.toast, 
-              toast.type === 'error' ? styles.toastError : styles.toastSuccess,
-              { transform: [{ translateY: toastAnim }] }
-            ]}
-            pointerEvents="none" 
-          >
-             <FontAwesome5 
-                name={toast.type === 'error' ? 'exclamation-circle' : 'check-circle'} 
-                size={16} 
-                color="#fff" 
-             />
+          <Animated.View style={[styles.toast, toast.type === 'error' ? styles.toastError : styles.toastSuccess, { transform: [{ translateY: toastAnim }] }]}>
+             <FontAwesome5 name={toast.type === 'error' ? 'exclamation-circle' : 'check-circle'} size={16} color="#fff" />
              <Text style={styles.toastText}>{toast.message}</Text>
           </Animated.View>
         )}
-
       </SafeAreaView>
     </View>
   );
@@ -271,39 +237,32 @@ export default function QuestionBuilderScreen({ route, navigation }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F8FAFC" },
-  safeArea: { flex: 1 },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#e2e8f0' },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, backgroundColor: '#fff', borderBottomWidth: 1, borderColor: '#e2e8f0' },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#1e293b' },
   headerSub: { fontSize: 12, color: '#64748b' },
-  publishBtn: { backgroundColor: '#16a34a', paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20 },
-  publishText: { color: '#fff', fontWeight: 'bold' },
-  draftBtn: { backgroundColor: '#e2e8f0', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20 },
-  draftText: { color: '#475569', fontWeight: 'bold' },
-  
-  card: { backgroundColor: '#fff', padding: 20, borderRadius: 16, marginBottom: 20, borderWidth: 1, borderColor: '#e2e8f0' },
-  row: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
-  qCount: { fontWeight: 'bold', color: '#4f46e5' },
-  markInputBox: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  markLabel: { fontSize: 12, color: '#64748b' },
-  markInput: { backgroundColor: '#f1f5f9', width: 40, padding: 4, textAlign: 'center', borderRadius: 4, fontWeight: 'bold' },
-  qInput: { backgroundColor: '#f8fafc', padding: 12, borderRadius: 8, height: 80, textAlignVertical: 'top', marginBottom: 16, borderWidth: 1, borderColor: '#e2e8f0' },
-  
-  optRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10, gap: 10 },
+  qCard: { backgroundColor: '#fff', padding: 16, borderRadius: 16, marginBottom: 16, borderWidth: 1, borderColor: '#e2e8f0', shadowColor: '#000', shadowOpacity: 0.02, shadowRadius: 4, elevation: 1 },
+  qHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12, alignItems: 'center' },
+  qIndex: { fontWeight: 'bold', color: '#4f46e5', fontSize: 14 },
+  markBox: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#f1f5f9', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
+  markLabel: { fontSize: 12, color: '#64748b', fontWeight:'600' },
+  markInput: { minWidth: 20, padding: 0, textAlign: 'center', fontSize: 14, fontWeight: 'bold', color: '#1e293b' },
+  qInput: { backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#e2e8f0', padding: 12, borderRadius: 12, marginBottom: 16, color: '#1e293b', fontSize: 15, textAlignVertical: 'top', minHeight: 60 },
+  optContainer: { gap: 10 },
+  optRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   radio: { padding: 4 },
-  radioDot: { width: 16, height: 16, borderRadius: 8, borderWidth: 2, borderColor: '#cbd5e1' },
+  radioDot: { width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: '#cbd5e1' },
   radioActive: { borderColor: '#16a34a', backgroundColor: '#16a34a' },
-  optInput: { flex: 1, backgroundColor: '#fff', borderWidth: 1, borderColor: '#e2e8f0', padding: 10, borderRadius: 8 },
+  optInput: { flex: 1, backgroundColor: '#fff', borderWidth: 1, borderColor: '#e2e8f0', padding: 10, borderRadius: 8, fontSize: 14, color: '#334155' },
   optInputActive: { borderColor: '#16a34a', backgroundColor: '#f0fdf4' },
-  
-  addBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 12, marginTop: 10, backgroundColor: '#eef2ff', borderRadius: 8, borderStyle: 'dashed', borderWidth: 1, borderColor: '#818cf8' },
-  addBtnText: { color: '#4f46e5', fontWeight: 'bold' },
-
-  previewItem: { flexDirection: 'row', justifyContent: 'space-between', padding: 12, backgroundColor: '#fff', marginBottom: 8, borderRadius: 8 },
-  previewText: { color: '#64748b', fontSize: 12, flex: 1 },
-  previewMarks: { fontWeight: 'bold', fontSize: 12, color: '#1e293b' },
-
-  /* --- TOAST STYLES --- */
-  toast: { position: 'absolute', bottom: 50, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, paddingHorizontal: 20, borderRadius: 30, zIndex: 999, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 10 },
+  addBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 16, backgroundColor: '#fff', borderRadius: 12, borderStyle: 'dashed', borderWidth: 2, borderColor: '#e2e8f0', marginTop: 10 },
+  addBtnText: { color: '#64748b', fontWeight: 'bold' },
+  footer: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: '#fff', padding: 20, borderTopWidth: 1, borderTopColor: '#f1f5f9', flexDirection: 'row', gap: 12 },
+  footerBtn: { flex: 1, paddingVertical: 14, borderRadius: 12, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8 },
+  draftBtn: { backgroundColor: '#f1f5f9' },
+  draftText: { color: '#475569', fontWeight: 'bold' },
+  publishBtn: { backgroundColor: '#4f46e5' },
+  publishText: { color: '#fff', fontWeight: 'bold' },
+  toast: { position: 'absolute', bottom: 100, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, paddingHorizontal: 20, borderRadius: 30, zIndex: 999, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 10 },
   toastSuccess: { backgroundColor: '#16a34a' },
   toastError: { backgroundColor: '#ef4444' },
   toastText: { color: '#fff', fontWeight: 'bold', fontSize: 14 },

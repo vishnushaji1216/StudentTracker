@@ -18,7 +18,8 @@ import {
   submitGradebook, 
   getTeacherSubjects,
   getTeacherDashboardStats,
-  getStudentReport
+  getStudentReport,
+  getClassSubjects
 } from "../controllers/teacher.controller.js";
 import { 
    logHandwritingReview, 
@@ -52,6 +53,7 @@ router.get("/dashboard-stats", auth, teacherCheck, getTeacherDashboardStats);
 router.get("/classes", auth, teacherCheck, getMyClasses);
 router.get("/classes/:classId/:subject", auth, teacherCheck, getClassDetail);
 router.put("/classes/:classId/:subject/status", auth, teacherCheck, updateClassStatus);
+router.get("/class-subjects", protect, restrictTo("teacher"), getClassSubjects);
 
 /* =====================================================
    STUDENT DATA

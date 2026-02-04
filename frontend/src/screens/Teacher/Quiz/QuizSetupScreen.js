@@ -6,7 +6,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import FontAwesome5 from "react-native-vector-icons/FontAwesome5";
 import DateTimePicker from '@react-native-community/datetimepicker'; 
-import api from "../../../services/api"; //
+import api from "../../../services/api"; 
 
 export default function QuizSetupScreen({ navigation }) {
   // --- STATE ---
@@ -17,9 +17,9 @@ export default function QuizSetupScreen({ navigation }) {
   
   // Dynamic Data State
   const [loadingClasses, setLoadingClasses] = useState(true);
-  const [rawClassData, setRawClassData] = useState([]); // Stores full API response
-  const [uniqueClasses, setUniqueClasses] = useState([]); // Unique Class Names
-  const [availableSubjects, setAvailableSubjects] = useState([]); // Subjects for selected class
+  const [rawClassData, setRawClassData] = useState([]); 
+  const [uniqueClasses, setUniqueClasses] = useState([]); 
+  const [availableSubjects, setAvailableSubjects] = useState([]); 
 
   // Selections
   const [selectedClass, setSelectedClass] = useState(''); 
@@ -27,7 +27,7 @@ export default function QuizSetupScreen({ navigation }) {
 
   // Dropdown Modal State
   const [modalVisible, setModalVisible] = useState(false);
-  const [modalType, setModalType] = useState(null); // 'CLASS' or 'SUBJECT'
+  const [modalType, setModalType] = useState(null); 
 
   // Date Picker State
   const [date, setDate] = useState(new Date());
@@ -45,19 +45,14 @@ export default function QuizSetupScreen({ navigation }) {
 
   const fetchTeacherClasses = async () => {
     try {
-      // Fetch data from existing endpoint
       const res = await api.get('/teacher/classes'); 
       const data = res.data.classes || [];
       
       setRawClassData(data);
 
-      // Extract Unique Class Names
-      // The API returns [{id: '9-A', subject: 'Math'}, {id: '9-A', subject: 'Physics'}]
-      // We want ['9-A']
       const classes = [...new Set(data.map(item => item.id))];
       setUniqueClasses(classes);
 
-      // Default Selection (Optional)
       if (classes.length > 0) {
         handleClassSelect(classes[0], data);
       }
@@ -74,18 +69,15 @@ export default function QuizSetupScreen({ navigation }) {
   const handleClassSelect = (className, dataOverride = null) => {
     setSelectedClass(className);
     
-    // Filter subjects taught by this teacher in this specific class
     const sourceData = dataOverride || rawClassData;
     const subjects = sourceData
       .filter(item => item.id === className)
       .map(item => item.subject);
     
-    // Remove duplicates just in case
     const uniqueSubj = [...new Set(subjects)];
     
     setAvailableSubjects(uniqueSubj);
     
-    // Auto-select first subject if available
     if (uniqueSubj.length > 0) {
         setSelectedSubject(uniqueSubj[0]);
     } else {
@@ -141,8 +133,10 @@ export default function QuizSetupScreen({ navigation }) {
   const formatTime = (d) => d.toTimeString().slice(0, 5);
 
   const handleNext = () => {
-
-    if(!title.trim()) { showToast("Please enter a Quiz Title"); return; }
+    // 1. Basic Validations
+    if (!title.trim()) { showToast("Please enter a Quiz Title"); return; }
+    if (!selectedClass) { showToast("Please select a Class"); return; } // <--- Added check
+    if (!selectedSubject) { showToast("Please select a Subject"); return; } // <--- Added check
 
     const durationNum = parseInt(duration, 10);
     const passingNum = parseInt(passingScore, 10);
@@ -156,8 +150,8 @@ export default function QuizSetupScreen({ navigation }) {
     navigation.navigate('QuestionBuilder', {
       setupData: {
         title, 
-        className, 
-        subject,   
+        className: selectedClass, // <--- FIXED: Map state variable to expected param name
+        subject: selectedSubject,   // <--- FIXED: Map state variable to expected param name
         duration: durationNum,      
         passingScore: passingNum,   
         releaseType, 

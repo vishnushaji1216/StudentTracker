@@ -13,11 +13,11 @@ import {
   Modal,
   Animated,
   Keyboard,
-  BackHandler // <--- Added
+  BackHandler 
 } from 'react-native';
 import FontAwesome5 from 'react-native-vector-icons/FontAwesome5';
 import api from '../../services/api'; 
-import TeacherSidebar from '../../components/TeacherSidebar'; // <--- Added
+import TeacherSidebar from '../../components/TeacherSidebar'; 
 
 export default function TeacherGradebookScreen({ navigation, route }) {
   // --- STATE ---
@@ -30,8 +30,8 @@ export default function TeacherGradebookScreen({ navigation, route }) {
 
   // Form State
   const [examTitle, setExamTitle] = useState('');
-  const [totalMarks, setTotalMarks] = useState('20'); 
-  const [className, setClassName] = useState('9-A'); 
+  const [totalMarks, setTotalMarks] = useState('25'); 
+  const [className, setClassName] = useState('');
   
   // Subject Picker State
   const [subject, setSubject] = useState('');
@@ -50,14 +50,14 @@ export default function TeacherGradebookScreen({ navigation, route }) {
     loadInitialData();
   }, []);
 
-  // --- BACK HANDLER (Close Sidebar First) ---
+  // --- BACK HANDLER ---
   useEffect(() => {
     const backHandler = BackHandler.addEventListener("hardwareBackPress", () => {
       if (isSidebarOpen) {
         setIsSidebarOpen(false);
-        return true; // Handle the event (don't exit)
+        return true; 
       }
-      return false; // Default behavior (exit/back)
+      return false; 
     });
     return () => backHandler.remove();
   }, [isSidebarOpen]);
@@ -65,15 +65,33 @@ export default function TeacherGradebookScreen({ navigation, route }) {
   const loadInitialData = async () => {
     try {
       setLoading(true);
-      const studentRes = await api.get(`/teacher/students?className=${className}`);
+
+      // 1. Get Teacher Profile to find assigned class
+      const profileRes = await api.get('/teacher/profile');
+      // Adjust based on your actual schema key (e.g., classTeachership or assignedClass)
+      const teacherClass = profileRes.data.classTeachership || profileRes.data.assignedClass; 
+
+      if (!teacherClass) {
+        showToast("No class assigned to teacher", "error");
+        setLoading(false);
+        return;
+      }
+
+      setClassName(teacherClass);
+
+      // 2. Fetch Students for that Class
+      const studentRes = await api.get(`/teacher/students?className=${teacherClass}`);
       setStudents(studentRes.data);
       
-      const subjectRes = await api.get(`/teacher/my-subjects?className=${className}`);
+      // 3. Fetch ALL Subjects for that Class (Not just 'my-subjects')
+      // Ensure your backend supports this endpoint or filter uniquely from student data if needed
+      const subjectRes = await api.get(`/teacher/class-subjects?className=${teacherClass}`);
       const subs = subjectRes.data; 
       setAvailableSubjects(subs);
       
       if (subs.length > 0) setSubject(subs[0]);
 
+      // 4. Initialize Marks Map
       const initialMap = {};
       studentRes.data.forEach(s => initialMap[s._id] = '');
       setMarksMap(initialMap);
@@ -155,7 +173,6 @@ export default function TeacherGradebookScreen({ navigation, route }) {
         
         showToast("Grades published successfully!", "success");
         setTimeout(() => {
-            // Optional: Reset form or Navigate
              setMarksMap({});
              setExamTitle('');
         }, 1500); 
@@ -168,7 +185,53 @@ export default function TeacherGradebookScreen({ navigation, route }) {
     }
   };
 
-  // --- RENDER HELPERS ---
+  // --- COMPONENTS ---
+
+  // 1. Header Component for FlatList (The "Meta Card")
+  const GradebookHeader = () => (
+    <View style={styles.metaCard}>
+        <View style={styles.inputGroup}>
+            <Text style={styles.label}>Exam Title</Text>
+            <TextInput 
+                style={styles.textInput} 
+                placeholder="e.g. Weekly Test 4" 
+                value={examTitle}
+                onChangeText={setExamTitle}
+            />
+        </View>
+        <View style={{flexDirection:'row', gap:15}}>
+            <View style={[styles.inputGroup, {flex:0.6}]}>
+                <Text style={styles.label}>Max Marks</Text>
+                <TextInput 
+                    style={[styles.textInput, {textAlign:'center', fontWeight:'bold'}]} 
+                    placeholder="100" 
+                    keyboardType="numeric"
+                    value={totalMarks}
+                    onChangeText={setTotalMarks}
+                />
+            </View>
+
+            <View style={[styles.inputGroup, {flex:1.4}]}>
+                <Text style={styles.label}>Subject</Text>
+                <TouchableOpacity 
+                    style={styles.dropdownTrigger}
+                    onPress={() => setShowSubjectPicker(true)}
+                >
+                    <Text style={styles.dropdownText}>
+                        {subject || "Select Subject"}
+                    </Text>
+                    <FontAwesome5 name="chevron-down" size={12} color="#64748b" />
+                </TouchableOpacity>
+            </View>
+        </View>
+        
+        <View style={styles.divider} />
+        
+        <Text style={styles.listTitle}>Student Marks ({students.length})</Text>
+    </View>
+  );
+
+  // 2. Render Item for FlatList
   const renderStudentRow = ({ item }) => {
     const maxDisplay = totalMarks && totalMarks.length > 0 ? totalMarks : '-';
 
@@ -209,81 +272,36 @@ export default function TeacherGradebookScreen({ navigation, route }) {
         navigation={navigation} 
         isOpen={isSidebarOpen} 
         onClose={() => setIsSidebarOpen(false)} 
-        activeItem="Gradebook" // Matches the label in Sidebar
+        activeItem="Gradebook" 
       />
       
       {/* HEADER */}
       <View style={styles.header}>
-        {/* Changed from Arrow Back to Menu Bars */}
         <TouchableOpacity onPress={() => setIsSidebarOpen(true)} style={styles.backBtn}>
             <FontAwesome5 name="bars" size={20} color="#1e293b" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Gradebook Entry</Text>
+        <Text style={styles.headerTitle}>Gradebook Entry ({className})</Text>
       </View>
 
       <KeyboardAvoidingView 
-        behavior={Platform.OS === "ios" ? "padding" : "height"} 
+        behavior={Platform.OS === "ios" ? "padding" : undefined} 
         style={{ flex: 1 }}
       >
-        <View style={styles.content}>
-            
-            {/* 1. EXAM DETAILS CARD */}
-            <View style={styles.metaCard}>
-                <View style={styles.inputGroup}>
-                    <Text style={styles.label}>Exam Title</Text>
-                    <TextInput 
-                        style={styles.textInput} 
-                        placeholder="e.g. Weekly Test 4" 
-                        value={examTitle}
-                        onChangeText={setExamTitle}
-                    />
-                </View>
-                <View style={{flexDirection:'row', gap:15}}>
-                    <View style={[styles.inputGroup, {flex:0.6}]}>
-                        <Text style={styles.label}>Max Marks</Text>
-                        <TextInput 
-                            style={[styles.textInput, {textAlign:'center', fontWeight:'bold'}]} 
-                            placeholder="100" 
-                            keyboardType="numeric"
-                            value={totalMarks}
-                            onChangeText={setTotalMarks}
-                        />
-                    </View>
+        {loading ? (
+            <ActivityIndicator size="large" color="#4f46e5" style={{marginTop: 50}} />
+        ) : (
+            <FlatList
+                data={students}
+                keyExtractor={item => item._id}
+                renderItem={renderStudentRow}
+                ListHeaderComponent={GradebookHeader} // <--- Moves Inputs inside Scrollable Area
+                contentContainerStyle={{ padding: 20, paddingBottom: 100 }}
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled" // Important for inputs inside FlatList
+            />
+        )}
 
-                    <View style={[styles.inputGroup, {flex:1.4}]}>
-                        <Text style={styles.label}>Subject</Text>
-                        <TouchableOpacity 
-                            style={styles.dropdownTrigger}
-                            onPress={() => setShowSubjectPicker(true)}
-                        >
-                            <Text style={styles.dropdownText}>
-                                {subject || "Select Subject"}
-                            </Text>
-                            <FontAwesome5 name="chevron-down" size={12} color="#64748b" />
-                        </TouchableOpacity>
-                    </View>
-                </View>
-            </View>
-
-            {/* 2. STUDENT LIST */}
-            <View style={styles.listHeader}>
-                <Text style={styles.listTitle}>Student Marks ({students.length})</Text>
-            </View>
-
-            {loading ? (
-                <ActivityIndicator size="large" color="#4f46e5" style={{marginTop: 50}} />
-            ) : (
-                <FlatList
-                    data={students}
-                    keyExtractor={item => item._id}
-                    renderItem={renderStudentRow}
-                    contentContainerStyle={{ paddingBottom: 100 }}
-                    showsVerticalScrollIndicator={false}
-                />
-            )}
-        </View>
-
-        {/* FOOTER BUTTON */}
+        {/* FOOTER BUTTON (Floating above keyboard if needed, or fixed at bottom) */}
         <View style={styles.footer}>
             <TouchableOpacity 
                 style={[styles.submitBtn, submitting && styles.disabledBtn]} 
@@ -306,24 +324,28 @@ export default function TeacherGradebookScreen({ navigation, route }) {
         <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
                 <Text style={styles.modalTitle}>Select Subject</Text>
-                {availableSubjects.map((sub, index) => (
-                    <TouchableOpacity 
-                        key={index} 
-                        style={styles.modalItem}
-                        onPress={() => {
-                            setSubject(sub);
-                            setShowSubjectPicker(false);
-                        }}
-                    >
-                        <Text style={[
-                            styles.modalItemText, 
-                            subject === sub && {color: '#4f46e5', fontWeight: 'bold'}
-                        ]}>
-                            {sub}
-                        </Text>
-                        {subject === sub && <FontAwesome5 name="check" size={14} color="#4f46e5" />}
-                    </TouchableOpacity>
-                ))}
+                {availableSubjects.length > 0 ? (
+                    availableSubjects.map((sub, index) => (
+                        <TouchableOpacity 
+                            key={index} 
+                            style={styles.modalItem}
+                            onPress={() => {
+                                setSubject(sub);
+                                setShowSubjectPicker(false);
+                            }}
+                        >
+                            <Text style={[
+                                styles.modalItemText, 
+                                subject === sub && {color: '#4f46e5', fontWeight: 'bold'}
+                            ]}>
+                                {sub}
+                            </Text>
+                            {subject === sub && <FontAwesome5 name="check" size={14} color="#4f46e5" />}
+                        </TouchableOpacity>
+                    ))
+                ) : (
+                    <Text style={{textAlign:'center', color:'#94a3b8', marginVertical:10}}>No subjects found for this class.</Text>
+                )}
                 <TouchableOpacity 
                     style={styles.modalClose} 
                     onPress={() => setShowSubjectPicker(false)}
@@ -334,7 +356,7 @@ export default function TeacherGradebookScreen({ navigation, route }) {
         </View>
       </Modal>
 
-      {/* --- MODERN FLOATING TOAST --- */}
+      {/* --- TOAST --- */}
       <Animated.View 
         style={[
             styles.toastContainer, 
@@ -360,8 +382,7 @@ const styles = StyleSheet.create({
   backBtn: { paddingRight: 20 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#1e293b' },
   
-  content: { flex: 1, padding: 20 },
-  
+  /* Meta Card (Header) */
   metaCard: { backgroundColor: '#fff', padding: 16, borderRadius: 16, marginBottom: 20, borderWidth: 1, borderColor: '#e2e8f0' },
   inputGroup: { marginBottom: 15 },
   label: { fontSize: 12, fontWeight: 'bold', color: '#64748b', marginBottom: 6, textTransform: 'uppercase' },
@@ -370,9 +391,10 @@ const styles = StyleSheet.create({
   dropdownTrigger: { flexDirection: 'row', justifyContent:'space-between', alignItems:'center', backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 12 },
   dropdownText: { fontSize: 14, color: '#1e293b', fontWeight:'500' },
 
-  listHeader: { marginBottom: 10 },
+  divider: { height: 1, backgroundColor: '#f1f5f9', marginVertical: 15 },
   listTitle: { fontSize: 14, fontWeight: 'bold', color: '#334155' },
 
+  /* List Items */
   studentRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#fff', padding: 12, borderRadius: 12, marginBottom: 10, borderWidth: 1, borderColor: '#f1f5f9' },
   studentInfo: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   avatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#eef2ff', justifyContent: 'center', alignItems: 'center' },
@@ -396,24 +418,7 @@ const styles = StyleSheet.create({
   modalItemText: { fontSize: 14, color: '#334155' },
   modalClose: { marginTop: 15, alignItems: 'center', padding: 10 },
 
-  /* --- TOAST STYLES --- */
-  toastContainer: {
-    position: 'absolute',
-    top: 0, 
-    left: 20,
-    right: 20,
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16,
-    borderRadius: 12,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 10, 
-    zIndex: 9999,
-    gap: 12
-  },
+  toastContainer: { position: 'absolute', top: 0, left: 20, right: 20, flexDirection: 'row', alignItems: 'center', padding: 16, borderRadius: 12, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 10, zIndex: 9999, gap: 12 },
   toastSuccess: { backgroundColor: '#16a34a' }, 
   toastError: { backgroundColor: '#ef4444' },   
   toastText: { color: '#fff', fontWeight: 'bold', fontSize: 14, flex: 1 }
