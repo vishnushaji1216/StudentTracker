@@ -327,7 +327,6 @@ export const getStudentDetail = async (req, res) => {
     const { id } = req.params;
 
     // 1. Fetch Student Identity & Fees
-    // We use .populate('fees') to get the Fee status immediately
     const student = await Student.findById(id).populate('fees');
     
     if (!student) {
@@ -335,95 +334,75 @@ export const getStudentDetail = async (req, res) => {
     }
 
     // 2. Identify Class Teacher
-    // Find the teacher whose 'classTeachership' matches the student's class
     const classTeacher = await Teacher.findOne({ classTeachership: student.className })
       .select('name mobile profilePic');
 
-    // 3. Calculate Academic Stats (Student Avg vs Class Avg)
-    
-    // A. Student's Average
-    const studentSubmissions = await Submission.find({ student: id, status: 'Graded' });
+    // --- 3. DATA FETCHING: ALL GRADED SUBMISSIONS ---
+    const allGradedSubs = await Submission.find({ 
+        student: id, 
+        status: 'graded' 
+    })
+    .populate('assignment', 'title subject type') 
+    .populate('quiz', 'title')
+    .sort({ submittedAt: -1 });
+
+    // A. Calculate Overall Student Average
     let totalObtained = 0;
     let totalPossible = 0;
-    
-    studentSubmissions.forEach(sub => {
-      totalObtained += sub.obtainedMarks || 0;
-      totalPossible += sub.totalMarks || 100;
+    allGradedSubs.forEach(sub => {
+        totalObtained += sub.obtainedMarks || 0;
+        totalPossible += sub.totalMarks || 100;
     });
-    
-    const studentAvg = totalPossible > 0 
-      ? Math.round((totalObtained / totalPossible) * 100) 
-      : 0;
+    const studentOverallAvg = totalPossible > 0 ? Math.round((totalObtained / totalPossible) * 100) : 0;
 
-    // B. Class Average (Aggregation)
-    // Aggregates all submissions for ALL students in this class to find a benchmark
-    const classStats = await Student.aggregate([
-      { $match: { className: student.className } },
-      {
-        $lookup: {
-          from: "submissions",
-          localField: "_id",
-          foreignField: "student",
-          as: "grades"
+    // B. Calculate Class Average (Aggregation)
+    const classStats = await Submission.aggregate([
+        { $match: { status: 'graded' } },
+        { $lookup: { from: 'students', localField: 'student', foreignField: '_id', as: 'st' } },
+        { $unwind: '$st' },
+        { $match: { 'st.className': student.className } },
+        { 
+            $group: { 
+                _id: null, 
+                avg: { $avg: { $multiply: [{ $divide: ["$obtainedMarks", "$totalMarks"] }, 100] } } 
+            } 
         }
-      },
-      { $unwind: "$grades" },
-      { $match: { "grades.status": "Graded" } },
-      {
-        $group: {
-          _id: null,
-          totalObtained: { $sum: "$grades.obtainedMarks" },
-          totalMarks: { $sum: "$grades.totalMarks" }
-        }
-      },
-      {
-        $project: {
-          classAvg: { 
-            $cond: [
-              { $eq: ["$totalMarks", 0] }, 
-              0, 
-              { $multiply: [{ $divide: ["$totalObtained", "$totalMarks"] }, 100] }
-            ]
-          }
-        }
-      }
     ]);
+    const classOverallAvg = classStats.length > 0 ? Math.round(classStats[0].avg) : 0;
 
-    const classAvg = classStats.length > 0 ? Math.round(classStats[0].classAvg) : 0;
-
-    // 4. Subject Breakdown (For the UI Accordion)
-    // Fetch Syllabus to determine which subjects the student actually has
+    // --- 4. SUBJECT BREAKDOWN ---
     const syllabusList = await Syllabus.find({ className: student.className }).populate('teacher', 'name');
 
-    // Iterate over subjects to build detailed report cards
     const subjectData = await Promise.all(syllabusList.map(async (doc) => {
       const subjectName = doc.subject;
       
-      // Check Notebook Status (Pending Homeworks)
-      const homeworks = await Assignment.find({ 
-        className: student.className, 
-        subject: subjectName, 
-        type: 'homework'
-      }).select('_id');
+      // I. Filter Submissions for this Subject
+      const subGrades = allGradedSubs.filter(s => 
+          s.subject === subjectName || 
+          (s.assignment && s.assignment.subject === subjectName)
+      );
       
-      const pendingCount = await Submission.countDocuments({
-        student: id,
-        assignment: { $in: homeworks.map(h => h._id) },
-        status: { $in: ['Pending', 'Submitted'] } // Submitted but not Graded = Pending Check
+      // II. Calculate Subject Score
+      let sObt = 0, sPos = 0;
+      subGrades.forEach(s => { 
+          sObt += s.obtainedMarks || 0; 
+          sPos += s.totalMarks || 100; 
       });
+      const myScore = sPos > 0 ? Math.round((sObt / sPos) * 100) : 0;
 
-      // Fetch Latest Exam Score
-      const latestExamSub = await Submission.findOne({
-        student: id,
-        status: 'Graded'
-      })
-      .populate({
-        path: 'assignment',
-        match: { subject: subjectName, type: { $in: ['exam', 'quiz'] } }
-      })
-      .sort({ submittedAt: -1 });
+      // III. Latest Exam
+      const latestExam = subGrades.find(s => ['exam', 'quiz'].includes(s.type));
+      let examTitle = "No Exams";
+      if (latestExam) {
+          examTitle = latestExam.assignment?.title || latestExam.quiz?.title || "Test";
+      }
 
-      const validExam = latestExamSub?.assignment ? latestExamSub : null;
+      // IV. Notebook Status
+      const pendingCount = await Submission.countDocuments({
+         student: id,
+         subject: subjectName,
+         status: { $in: ['pending', 'submitted', 'in-progress'] }
+      });
 
       return {
         id: subjectName.toLowerCase(),
@@ -433,22 +412,26 @@ export const getStudentDetail = async (req, res) => {
         color: doc.color || '#4f46e5',
         bgColor: '#eef2ff',
         
-        // Subject Metrics
-        score: studentAvg, // (Refinement: In V2, calculate subject-specific avg here)
-        avg: classAvg, 
+        // Metrics
+        score: myScore,
+        avg: classOverallAvg,
+        
+        // 👇 CHANGED: Removed getGrade(), now showing percentage directly
+        grade: myScore + "%", 
         
         chapter: doc.chapters.find(c => c.isCurrent)?.title || "No Active Chapter",
         notebook: pendingCount === 0 ? "Checked" : "Pending",
         
-        examName: validExam ? validExam.assignment.title : "No Exams",
-        examScore: validExam ? validExam.obtainedMarks : null,
-        examTotal: validExam ? validExam.totalMarks : null,
-        isExamDone: !!validExam,
-        isWeak: studentAvg < classAvg 
+        examName: examTitle,
+        examScore: latestExam ? latestExam.obtainedMarks : '-',
+        examTotal: latestExam ? latestExam.totalMarks : '-',
+        isExamDone: !!latestExam,
+        
+        isWeak: myScore < (classOverallAvg - 10) 
       };
     }));
 
-    // 5. Return the Unified Data Structure
+    // --- 5. RETURN RESPONSE ---
     res.status(200).json({
       identity: {
         id: student._id,
@@ -458,17 +441,17 @@ export const getStudentDetail = async (req, res) => {
         grNumber: student.grNumber || "N/A",
         mobile: student.mobile,
         profilePic: student.profilePic,
-        initials: student.name.split(' ').map(n => n[0]).join('').substring(0,2).toUpperCase()
+        initials: student.name.substring(0,2).toUpperCase()
       },
       metrics: {
-        avgScore: studentAvg + "%",
+        avgScore: studentOverallAvg + "%",
         writingGrade: mapStarsToGrade(student.stats?.writingStars),
         feeStatus: (student.fees && student.fees.some(f => f.status === 'Overdue')) ? 'Overdue' : 'Clear'
       },
       chart: {
-        studentAvg,
-        classAvg,
-        trend: studentAvg >= classAvg ? 'Performing above average' : 'Needs attention'
+        studentAvg: studentOverallAvg,
+        classAvg: classOverallAvg,
+        trend: studentOverallAvg >= classOverallAvg ? 'Above Average' : 'Below Average'
       },
       classTeacher: classTeacher ? {
         name: classTeacher.name,
@@ -531,4 +514,3 @@ export const updateTeacherProfile = async (req, res) => {
     res.status(500).json({ message: "Update failed", error: error.message });
   }
 };
-

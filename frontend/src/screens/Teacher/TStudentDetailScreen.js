@@ -37,6 +37,7 @@ export default function TStudentDetailScreen({ navigation, route }) {
   const [loading, setLoading] = useState(true);
   const [student, setStudent] = useState(null);
   const [subjects, setSubjects] = useState([]);
+  const [ranking, setRanking] = useState(null); // State for Rank Data
   const [expandedId, setExpandedId] = useState(null); 
 
   // --- FETCH DATA ---
@@ -54,6 +55,11 @@ export default function TStudentDetailScreen({ navigation, route }) {
       const response = await api.get(`/teacher/student/${studentId}/report`);
       setStudent(response.data.student);
       setSubjects(response.data.subjects);
+      
+      // 1. SAVE RANKING DATA
+      if(response.data.ranking) {
+          setRanking(response.data.ranking);
+      }
       
       // Auto-expand the first subject if available
       if(response.data.subjects.length > 0) {
@@ -86,7 +92,11 @@ export default function TStudentDetailScreen({ navigation, route }) {
       setIsSidebarOpen(false);
       return true;
     }
-    navigation.navigate('StudentDirectory');
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+  } else {
+      navigation.navigate('StudentDirectory');
+  }
     return true;
   };
 
@@ -182,7 +192,10 @@ export default function TStudentDetailScreen({ navigation, route }) {
             </View>
           </View>
 
-          {/* 3. Subjects (Accordion) */}
+          {/* 3. NEW RANKING CARD (Inserted Here) */}
+          <RankingCard ranking={ranking} />
+
+          {/* 4. Subjects (Accordion) */}
           <Text style={styles.sectionTitle}>ACADEMIC REPORT</Text>
           <View style={styles.subjectList}>
             {subjects.length > 0 ? subjects.map((sub) => {
@@ -208,7 +221,7 @@ export default function TStudentDetailScreen({ navigation, route }) {
                         </View>
                       </View>
                       
-                      {/* Score Badge (Only visible if exam done) */}
+                      {/* Score Badge */}
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                         {sub.isExamDone && (
                             <View style={[styles.scoreBadge, { backgroundColor: '#f0fdf4' }]}>
@@ -301,6 +314,61 @@ export default function TStudentDetailScreen({ navigation, route }) {
 
 /* --- SUB-COMPONENTS --- */
 
+// 1. NEW RANKING CARD COMPONENT
+const RankingCard = ({ ranking }) => {
+  if (!ranking) return null;
+
+  const { currentRank, totalStudents, studentAvg, classAvg, isAboveAvg } = ranking;
+  
+  // Calculate width for bars (capped at 100%)
+  const studentWidth = Math.min(Math.max(studentAvg, 5), 100) + "%";
+  const classWidth = Math.min(Math.max(classAvg, 5), 100) + "%";
+
+  const statusColor = isAboveAvg ? '#16a34a' : '#ef4444'; // Green or Red
+
+  return (
+    <View style={styles.rankCard}>
+      {/* Left: Badge */}
+      <View style={styles.rankBadgeContainer}>
+        <Text style={styles.rankLabel}>CLASS RANK</Text>
+        <View style={styles.rankCircle}>
+            <Text style={styles.rankNumber}>
+                <Text style={{fontSize:14, color:'#64748b'}}>#</Text>
+                {currentRank}
+            </Text>
+            <Text style={styles.rankTotal}>/ {totalStudents}</Text>
+        </View>
+      </View>
+
+      {/* Right: Progress Lines */}
+      <View style={{ flex: 1, paddingLeft: 16, justifyContent: 'center' }}>
+        
+        {/* Student Line */}
+        <View style={styles.progressRow}>
+            <View style={{flexDirection:'row', justifyContent:'space-between', marginBottom:4}}>
+                <Text style={styles.progressLabel}>Student Avg</Text>
+                <Text style={[styles.progressValue, {color: statusColor}]}>{studentAvg}%</Text>
+            </View>
+            <View style={styles.track}>
+                <View style={[styles.fill, { width: studentWidth, backgroundColor: statusColor }]} />
+            </View>
+        </View>
+
+        {/* Class Line */}
+        <View style={[styles.progressRow, {marginTop: 12}]}>
+             <View style={{flexDirection:'row', justifyContent:'space-between', marginBottom:4}}>
+                <Text style={styles.progressLabel}>Class Avg</Text>
+                <Text style={styles.progressValue}>{classAvg}%</Text>
+            </View>
+            <View style={styles.track}>
+                <View style={[styles.fill, { width: classWidth, backgroundColor: '#94a3b8' }]} />
+            </View>
+        </View>
+      </View>
+    </View>
+  );
+};
+
 const DetailItem = ({ label, value, valueColor = '#334155', icon }) => (
   <View style={styles.gridItem}>
     <Text style={styles.gridLabel}>{label}</Text>
@@ -333,6 +401,41 @@ const styles = StyleSheet.create({
   parentLabel: { fontSize: 10, fontWeight: 'bold', color: '#94a3b8', marginBottom: 4 },
   parentValue: { fontSize: 14, fontWeight: 'bold', color: '#334155' },
   contactIconBtn: { width: 36, height: 36, borderRadius: 18, borderWidth: 1, justifyContent: 'center', alignItems: 'center' },
+
+  /* --- RANK CARD STYLES (NEW) --- */
+  rankCard: { 
+    flexDirection: 'row', 
+    backgroundColor: '#fff', 
+    borderRadius: 16, 
+    padding: 16, 
+    marginBottom: 24, // Space before Academic Report
+    borderWidth: 1, 
+    borderColor: '#e2e8f0',
+    shadowColor: '#000', shadowOpacity: 0.02, shadowRadius: 8, elevation: 2
+  },
+  rankBadgeContainer: { 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    paddingRight: 16, 
+    borderRightWidth: 1, 
+    borderRightColor: '#f1f5f9' 
+  },
+  rankLabel: { fontSize: 10, fontWeight: 'bold', color: '#94a3b8', marginBottom: 6 },
+  rankCircle: { 
+    width: 64, height: 64, 
+    borderRadius: 32, 
+    backgroundColor: '#f8fafc', 
+    justifyContent: 'center', alignItems: 'center',
+    borderWidth: 3, borderColor: '#eef2ff'
+  },
+  rankNumber: { fontSize: 24, fontWeight: 'bold', color: '#1e293b' },
+  rankTotal: { fontSize: 10, color: '#94a3b8', fontWeight: '600' },
+
+  progressRow: { width: '100%' },
+  progressLabel: { fontSize: 11, fontWeight: 'bold', color: '#64748b' },
+  progressValue: { fontSize: 11, fontWeight: 'bold', color: '#334155' },
+  track: { height: 6, backgroundColor: '#f1f5f9', borderRadius: 3, overflow: 'hidden' },
+  fill: { height: '100%', borderRadius: 3 },
 
   /* 3. Subjects */
   sectionTitle: { fontSize: 12, fontWeight: 'bold', color: '#94a3b8', marginBottom: 12, letterSpacing: 0.5 },

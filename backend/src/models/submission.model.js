@@ -1,21 +1,18 @@
 import mongoose from 'mongoose';
 
 const SubmissionSchema = new mongoose.Schema({
-  // 1. LINKING (The "Or" Logic)
-  assignment: { 
-    type: mongoose.Schema.Types.ObjectId, 
-    ref: 'Assignment', 
-    required: false 
-  },
   
-  quiz: { 
-    type: mongoose.Schema.Types.ObjectId, 
-    ref: 'Quiz', 
-    required: false 
-  },
-
+  assignment: { type: mongoose.Schema.Types.ObjectId, ref: 'Assignment' },
+  quiz: { type: mongoose.Schema.Types.ObjectId, ref: 'Quiz' },
   student: { type: mongoose.Schema.Types.ObjectId, ref: 'Student', required: true },
   teacher: { type: mongoose.Schema.Types.ObjectId, ref: 'Teacher' },
+
+  
+  subject: { 
+    type: String, 
+    required: true, 
+    index: true 
+  },
 
   type: {
     type: String,
@@ -28,7 +25,7 @@ const SubmissionSchema = new mongoose.Schema({
 
   status: { 
     type: String, 
-    enum: ['pending', 'in-progress', 'submitted', 'graded', 'late', 'Graded'], 
+    enum: ['pending', 'in-progress', 'submitted', 'graded', 'late'], 
     default: 'pending' 
   },
 

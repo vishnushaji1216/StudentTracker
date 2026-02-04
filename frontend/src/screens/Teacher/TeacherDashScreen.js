@@ -83,9 +83,10 @@ export default function TeacherDashScreen({ navigation }) {
     if (!history || history.length < 3) return { line: "", area: "", points: [] };
 
     // Map scores (0-100) to Y coordinates (100-0) because SVG 0 is top
+    // Added padding to x and y calculations to prevent cutoff
     const getPoint = (index, score) => {
-      const x = index * 150; // 0, 150, 300
-      const y = 100 - score; // Score 80 -> y=20
+      const x = index * 130 + 20; // 20, 150, 280 (Added padding)
+      const y = 90 - (score * 0.8); // Scale score to fit in 10-90 range to avoid top/bottom cutoff
       return { x, y };
     };
 
@@ -97,11 +98,11 @@ export default function TeacherDashScreen({ navigation }) {
     // Simple S-Curve logic for 3 points
     const linePath = `
       M ${p1.x},${p1.y} 
-      C ${p1.x + 75},${p1.y} ${p2.x - 75},${p2.y} ${p2.x},${p2.y}
-      C ${p2.x + 75},${p2.y} ${p3.x - 75},${p3.y} ${p3.x},${p3.y}
+      C ${p1.x + 65},${p1.y} ${p2.x - 65},${p2.y} ${p2.x},${p2.y}
+      C ${p2.x + 65},${p2.y} ${p3.x - 65},${p3.y} ${p3.x},${p3.y}
     `;
 
-    const areaPath = `${linePath} L 300,100 L 0,100 Z`;
+    const areaPath = `${linePath} L 280,100 L 20,100 Z`;
 
     return { line: linePath, area: areaPath, points: [p1, p2, p3] };
   };
@@ -173,15 +174,13 @@ export default function TeacherDashScreen({ navigation }) {
                       </View>
                     </View>
                   </View>
-                  <TouchableOpacity style={styles.moreBtn}>
-                    <FontAwesome5 name="ellipsis-h" size={14} color="#94a3b8" />
-                  </TouchableOpacity>
+                  {/* Removed the three-dot button here */}
                 </View>
 
                 {/* Dynamic Chart Area */}
                 <View style={styles.chartContainer}>
                   {stats.classPerformance.history.length >= 3 ? (
-                    <Svg height="100%" width="100%" viewBox="0 0 300 100" preserveAspectRatio="none">
+                    <Svg height="100%" width="100%" viewBox="0 0 300 110" preserveAspectRatio="none">
                       <Defs>
                         <LinearGradient id="grad" x1="0" y1="0" x2="0" y2="1">
                           <Stop offset="0" stopColor="#4f46e5" stopOpacity="0.2" />
@@ -190,9 +189,9 @@ export default function TeacherDashScreen({ navigation }) {
                       </Defs>
                       
                       {/* Grid Lines */}
-                      <Line x1="0" y1="0" x2="300" y2="0" stroke="#f8fafc" strokeWidth="1" />
-                      <Line x1="0" y1="50" x2="300" y2="50" stroke="#f8fafc" strokeWidth="1" />
-                      <Line x1="0" y1="100" x2="300" y2="100" stroke="#f8fafc" strokeWidth="1" />
+                      <Line x1="20" y1="10" x2="280" y2="10" stroke="#f8fafc" strokeWidth="1" />
+                      <Line x1="20" y1="50" x2="280" y2="50" stroke="#f8fafc" strokeWidth="1" />
+                      <Line x1="20" y1="90" x2="280" y2="90" stroke="#f8fafc" strokeWidth="1" />
 
                       {/* The Generated Paths */}
                       <Path d={area} fill="url(#grad)" />
@@ -203,12 +202,12 @@ export default function TeacherDashScreen({ navigation }) {
                         <React.Fragment key={i}>
                           <Circle cx={p.x} cy={p.y} r={i===2 ? 4 : 3} fill={i===2 ? "white" : "#4f46e5"} stroke={i===2 ? "#4f46e5" : "none"} strokeWidth={i===2 ? 2 : 0}/>
                           <SvgText 
-                            x={p.x + (i===0 ? 5 : i===2 ? -10 : 0)} 
-                            y={p.y - 10} 
+                            x={p.x} 
+                            y={p.y - 12} 
                             fontSize="10" 
                             fill="#4f46e5" 
                             fontWeight="bold" 
-                            textAnchor={i===0 ? "start" : i===2 ? "end" : "middle"}
+                            textAnchor="middle"
                           >
                             {stats.classPerformance.history[i].score}%
                           </SvgText>
@@ -222,12 +221,17 @@ export default function TeacherDashScreen({ navigation }) {
                   )}
                 </View>
 
-                {/* X-Axis Labels */}
+                {/* X-Axis Labels - Modified to wrap text */}
                 <View style={styles.chartLabels}>
                   {stats.classPerformance.history.map((item, index) => (
-                    <Text key={index} style={styles.chartLabel}>
-                      {item.label.length > 8 ? item.label.substring(0,8)+"..." : item.label}
-                    </Text>
+                    <View key={index} style={{ width: 80, alignItems: (index === 0 ? 'flex-start' : index === 2 ? 'flex-end' : 'center') }}>
+                        <Text style={[
+                            styles.chartLabel, 
+                            { textAlign: (index === 0 ? 'left' : index === 2 ? 'right' : 'center') }
+                        ]}>
+                          {item.label}
+                        </Text>
+                    </View>
                   ))}
                   {/* Fallback if empty */}
                   {stats.classPerformance.history.length === 0 && <Text style={styles.chartLabel}>No Data</Text>}
@@ -334,8 +338,8 @@ const styles = StyleSheet.create({
   heroTrend: { flexDirection: 'row', alignItems: 'center', gap: 2, backgroundColor: '#f0fdf4', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
   heroTrendText: { fontSize: 10, fontWeight: 'bold', color: '#16a34a' },
   moreBtn: { padding: 8, backgroundColor: '#f8fafc', borderRadius: 8 },
-  chartContainer: { height: 100, width: '100%', marginBottom: 12 },
-  chartLabels: { flexDirection: 'row', justifyContent: 'space-between' },
+  chartContainer: { height: 110, width: '100%', marginBottom: 12 }, // Increased height slightly
+  chartLabels: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 10 },
   chartLabel: { fontSize: 10, fontWeight: 'bold', color: '#94a3b8', textTransform: 'uppercase' },
   secondaryCard: { backgroundColor: '#fff', padding: 16, borderRadius: 24, borderWidth: 1, borderColor: '#f1f5f9', shadowColor: '#000', shadowOpacity: 0.02, shadowRadius: 8, marginBottom: 24, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   cardSubtitle: { fontSize: 10, fontWeight: 'bold', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.5 },

@@ -193,7 +193,7 @@ export const createAssignment = async (req, res) => {
       description,
       type: type || 'homework',
       dueDate,
-      totalMarks: totalMarks || 100,
+      totalMarks: totalMarks || 20,
       targetType: targetType || 'all',
       rollRange: targetType === 'range' ? { start: Number(rollStart), end: Number(rollEnd) } : null,
       status: 'Active'
@@ -217,69 +217,109 @@ export const submitGradebook = async (req, res) => {
   try {
     const { className, subject, examTitle, totalMarks, studentMarks } = req.body;
 
-    // 1. Create a "Ghost" Assignment container
+    console.log("📝 Gradebook Payload:", { className, subject, count: studentMarks.length });
+
+    if (!studentMarks || studentMarks.length === 0) {
+        return res.status(400).json({ message: "No student marks provided" });
+    }
+
+    // 1. Create a "Ghost" Assignment (Container for the exam)
     const examEntry = await Assignment.create({
       teacher: req.user.id,
       title: examTitle,
       subject: subject,
       className: className,
       type: 'exam', 
+      isOffline: true,
       totalMarks: Number(totalMarks),
       status: 'Completed', 
       dueDate: new Date()
     });
 
-    // 2. Prepare Bulk Submissions
     const submissions = studentMarks.map(item => ({
-      student: item.studentId,
+      student: item.studentId, 
       teacher: req.user.id,
-      assignment: examEntry._id,
-      type: 'exam',
-      status: 'Graded',
-      obtainedMarks: item.marks,
+      assignment: examEntry._id,      
+      subject: subject, 
+      type: 'exam',     
+      status: 'graded', 
+      obtainedMarks: Number(item.marks), 
       totalMarks: Number(totalMarks),
+      
       submittedAt: new Date()
     }));
 
-    // 3. Bulk Insert
-    await Submission.insertMany(submissions);
+    const result = await Submission.insertMany(submissions);
+    
+    console.log(`✅ Saved ${result.length} marks for ${subject}`);
 
-    res.status(201).json({ message: "Grades published successfully" });
+    res.status(201).json({ message: "Grades published successfully", count: result.length });
 
   } catch (error) {
-    console.error("Gradebook Error:", error);
-    res.status(500).json({ message: "Failed to publish grades" });
+    console.error("❌ Gradebook Error:", error);
+    res.status(500).json({ message: "Failed to publish grades", error: error.message });
   }
 };
 
 // --- 6. DASHBOARD STATS ---
 export const getTeacherDashboardStats = async (req, res) => {
   try {
+    console.log("\n🔍 [TEACHER APP DEBUG] Fetching Dashboard Stats");
+
     const teacherId = req.user.id;
     const teacher = await Teacher.findById(teacherId);
-    
-    // Default to primary class, or handle empty state if not set
-    const className = teacher.classTeachership || (teacher.assignments[0] ? teacher.assignments[0].class : null);
+
+    if (!teacher) {
+      console.log("❌ Teacher not found");
+      return res.status(404).json({ message: "Teacher not found" });
+    }
+
+    const className =
+      teacher.classTeachership ||
+      (teacher.assignments?.[0] ? teacher.assignments[0].class : null);
+
+    console.log("🏫 Class Identified:", className);
 
     if (!className) {
+      console.log("⚠️ No class assigned to teacher");
       return res.status(200).json({
-          className: "N/A",
-          classPerformance: { currentAvg: 0, trend: 0, history: [] },
-          pendingTasks: { audio: 0, handwriting: 0, total: 0 }
+        className: "N/A",
+        classPerformance: { currentAvg: 0, trend: 0, history: [] },
+        pendingTasks: { audio: 0, handwriting: 0, total: 0 }
       });
     }
 
-    const assignments = await Assignment.find({
-      className: className,
-      type: { $in: ['exam', 'quiz'] },
-      status: { $in: ['Completed', 'Active'] }
-    }).select('title type createdAt totalMarks');
+    // --------------------------------------------------
+    // 🔎 DEBUG 1: Check subject field existence
+    // --------------------------------------------------
+    const debugSubjects = await Submission.aggregate([
+      { $match: { status: { $in: ["graded", "Graded"] } } },
+      { $group: { _id: "$subject", count: { $sum: 1 } } }
+    ]);
 
-    const quizzes = await Quiz.find({ teacher: teacherId }).select('title totalMarks createdAt');
+    console.log("📊 Subjects found in submissions:", debugSubjects);
+
+    if (debugSubjects.length === 0) {
+      console.log("⚠️ No subject field found in submissions");
+    }
+
+    // --------------------------------------------------
+    // ORIGINAL LOGIC STARTS HERE
+    // --------------------------------------------------
+
+    const assignments = await Assignment.find({
+      className,
+      type: { $in: ["exam", "quiz"] },
+      status: { $in: ["Completed", "Active"] }
+    }).select("title type createdAt totalMarks");
+
+    const quizzes = await Quiz.find({ teacher: teacherId }).select(
+      "title totalMarks createdAt"
+    );
 
     let allEvents = [
-      ...assignments.map(a => ({ ...a.toObject(), category: 'assignment' })), 
-      ...quizzes.map(q => ({ ...q.toObject(), category: 'quiz' }))
+      ...assignments.map(a => ({ ...a.toObject(), category: "assignment" })),
+      ...quizzes.map(q => ({ ...q.toObject(), category: "quiz" }))
     ];
 
     allEvents.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
@@ -289,23 +329,31 @@ export const getTeacherDashboardStats = async (req, res) => {
     let eventStats = [];
 
     for (const event of allEvents) {
-      const query = { status: 'Graded' };
-      if (event.category === 'assignment') query.assignment = event._id;
+      const query = { status: { $in: ["graded", "Graded"] } };
+
+      if (event.category === "assignment") query.assignment = event._id;
       else query.quiz = event._id;
 
-      const submissions = await Submission.find(query).select('obtainedMarks totalMarks');
+      const submissions = await Submission.find(query).select(
+        "obtainedMarks totalMarks subject"
+      );
+
+      console.log(
+        `📝 ${event.title} → Submissions Found:`,
+        submissions.length
+      );
 
       if (submissions.length > 0) {
         let eventObtained = 0;
         let eventTotal = 0;
 
         submissions.forEach(s => {
-          eventObtained += s.obtainedMarks;
-          eventTotal += (s.totalMarks || event.totalMarks || 100);
+          eventObtained += s.obtainedMarks || 0;
+          eventTotal += s.totalMarks || event.totalMarks || 100;
         });
 
-        // Avoid division by zero
-        const eventAvg = eventTotal > 0 ? (eventObtained / eventTotal) * 100 : 0;
+        const eventAvg =
+          eventTotal > 0 ? (eventObtained / eventTotal) * 100 : 0;
 
         eventStats.push({
           id: event._id,
@@ -319,47 +367,62 @@ export const getTeacherDashboardStats = async (req, res) => {
       }
     }
 
-    const globalAverage = totalPossibleGlobal > 0 
-        ? Math.round((totalObtainedGlobal / totalPossibleGlobal) * 100) 
+    const globalAverage =
+      totalPossibleGlobal > 0
+        ? Math.round((totalObtainedGlobal / totalPossibleGlobal) * 100)
         : 0;
 
+    console.log("📈 Global Average:", globalAverage);
+
     const graphData = eventStats.slice(-3); // Last 3 events
+
+    console.log("📊 Graph Data (Last 3 Events):", graphData);
 
     let trend = 0;
     if (eventStats.length >= 2) {
       const latest = eventStats[eventStats.length - 1].score;
       const previous = eventStats[eventStats.length - 2].score;
-      trend = latest - previous; 
+      trend = latest - previous;
     }
 
-    const pendingAudio = await Submission.countDocuments({ 
-      teacher: teacherId, 
-      type: 'audio', 
-      status: 'Submitted' 
+    console.log("📉 Performance Trend:", trend);
+
+    // --------------------------------------------------
+    // Pending Tasks
+    // --------------------------------------------------
+    const pendingAudio = await Submission.countDocuments({
+      teacher: teacherId,
+      type: "audio",
+      status: "Submitted"
     });
 
-    const pendingHandwriting = await Submission.countDocuments({ 
-      teacher: teacherId, 
-      type: 'handwriting', 
-      status: 'Submitted' 
+    const pendingHandwriting = await Submission.countDocuments({
+      teacher: teacherId,
+      type: "handwriting",
+      status: "Submitted"
+    });
+
+    console.log("⏳ Pending Tasks:", {
+      audio: pendingAudio,
+      handwriting: pendingHandwriting
     });
 
     res.json({
       className,
       classPerformance: {
-          currentAvg: globalAverage,
-          trend: trend, 
-          history: graphData
+        currentAvg: globalAverage,
+        trend,
+        history: graphData
       },
       pendingTasks: {
-          audio: pendingAudio,
-          handwriting: pendingHandwriting,
-          total: pendingAudio + pendingHandwriting
+        audio: pendingAudio,
+        handwriting: pendingHandwriting,
+        total: pendingAudio + pendingHandwriting
       }
     });
 
   } catch (error) {
-    console.error("Dashboard Stats Error:", error);
+    console.error("❌ Teacher Dashboard Stats Error:", error);
     res.status(500).json({ message: "Failed to load dashboard stats" });
   }
 };
@@ -646,79 +709,199 @@ export const getStudentReport = async (req, res) => {
     const { studentId } = req.params;
     const teacherId = req.user.id;
 
+    console.log(`\n🔍 [DEBUG] Generating Student Report + Ranking for: ${studentId}`);
+
+    // --------------------------------------------------
+    // 1. FETCH STUDENT
+    // --------------------------------------------------
     const student = await Student.findById(studentId);
-    if (!student) return res.status(404).json({ message: "Student not found" });
+    if (!student) {
+      console.log("❌ Student not found");
+      return res.status(404).json({ message: "Student not found" });
+    }
 
+    // --------------------------------------------------
+    // 2. FETCH TEACHER (PERMISSION CHECK)
+    // --------------------------------------------------
     const teacher = await Teacher.findById(teacherId);
-
     const isClassTeacher = teacher.classTeachership === student.className;
 
-    const allSyllabus = await Syllabus.find({ className: student.className }).populate('teacher', 'name');
+    console.log(`👤 Teacher: ${teacher.name} | Class Teacher? ${isClassTeacher}`);
 
-    const visibleSubjects = isClassTeacher 
-      ? allSyllabus 
-      : allSyllabus.filter(s => s.teacher._id.toString() === teacherId);
+    // --------------------------------------------------
+    // 3. 🔥 RANKING ENGINE (NEW)
+    // --------------------------------------------------
+    console.log("🏁 Calculating class ranking...");
+
+    const classRanking = await Submission.aggregate([
+      { $match: { status: "graded" } },
+
+      {
+        $lookup: {
+          from: "students",
+          localField: "student",
+          foreignField: "_id",
+          as: "st"
+        }
+      },
+      { $unwind: "$st" },
+
+      { $match: { "st.className": student.className } },
+
+      {
+        $group: {
+          _id: "$student",
+          avgScore: {
+            $avg: {
+              $multiply: [
+                { $cond: [{ $eq: ["$totalMarks", 0] }, 0, { $divide: ["$obtainedMarks", "$totalMarks"] }] },
+                100
+              ]
+            }
+          }
+        }
+      },
+
+      { $sort: { avgScore: -1 } }
+    ]);
+
+    console.log(`📊 Ranked Students Found: ${classRanking.length}`);
+
+    const myRankIndex = classRanking.findIndex(
+      r => r._id.toString() === studentId
+    );
+
+    const currentRank = myRankIndex !== -1 ? myRankIndex + 1 : "-";
+
+    const totalStudents = await Student.countDocuments({
+      className: student.className
+    });
+
+    const myAvgData = classRanking.find(
+      r => r._id.toString() === studentId
+    );
+    const myAvg = myAvgData ? Math.round(myAvgData.avgScore) : 0;
+
+    const classAvg =
+      classRanking.length > 0
+        ? Math.round(
+            classRanking.reduce((acc, curr) => acc + curr.avgScore, 0) /
+              classRanking.length
+          )
+        : 0;
+
+    console.log(
+      `🏆 Rank #${currentRank}/${totalStudents} | My Avg: ${myAvg}% | Class Avg: ${classAvg}%`
+    );
+
+    // --------------------------------------------------
+    // 4. FETCH SYLLABUS (SUBJECTS)
+    // --------------------------------------------------
+    const allSyllabus = await Syllabus.find({
+      className: student.className
+    }).populate("teacher", "name");
+
+    const visibleSubjects = allSyllabus;
+    console.log(`📚 Visible Subjects: ${visibleSubjects.length}`);
 
     if (visibleSubjects.length === 0) {
-      return res.status(200).json({ 
-        student, 
-        subjects: [] 
+      console.log("⚠️ No syllabus found for this class");
+      return res.status(200).json({
+        student,
+        ranking: {
+          currentRank,
+          totalStudents,
+          studentAvg: myAvg,
+          classAvg,
+          isAboveAvg: myAvg >= classAvg
+        },
+        subjects: []
       });
     }
 
-    const reportCards = await Promise.all(visibleSubjects.map(async (doc) => {
+    // --------------------------------------------------
+    // 5. FETCH ALL GRADED SUBMISSIONS (FIXED QUERY)
+    // --------------------------------------------------
+    const allGradedSubs = await Submission.find({
+      student: studentId,
+      status: "graded"
+    })
+      .populate("assignment", "title subject type totalMarks")
+      .populate("quiz", "title")
+      .sort({ submittedAt: -1 });
 
-      const homeworks = await Assignment.find({ 
-        className: student.className, 
-        subject: doc.subject, 
-        type: 'homework',
-        status: { $ne: 'Draft' } 
-      }).select('_id');
-      
-      const homeworkIds = homeworks.map(h => h._id);
+    console.log(`📊 Total Graded Submissions: ${allGradedSubs.length}`);
 
-      const pendingCheck = await Submission.countDocuments({
-        student: studentId,
-        assignment: { $in: homeworkIds },
-        status: 'Submitted' 
-      });
+    if (allGradedSubs.length > 0) {
+      console.log(
+        "📝 Sample Submission Subject:",
+        allGradedSubs[0].subject || "Undefined"
+      );
+    }
 
-      const notebookStatus = pendingCheck === 0 ? "Checked" : "Pending";
+    // --------------------------------------------------
+    // 6. MAP SUBJECT REPORT CARDS
+    // --------------------------------------------------
+    const reportCards = await Promise.all(
+      visibleSubjects.map(async doc => {
+        const subjectName = doc.subject;
 
-      const examAssignments = await Assignment.find({ 
-        className: student.className, 
-        subject: doc.subject, 
-        type: 'exam' 
-      }).select('_id title totalMarks');
-      
-      const examIds = examAssignments.map(e => e._id);
+        const subGrades = allGradedSubs.filter(
+          s =>
+            s.subject === subjectName ||
+            (s.assignment && s.assignment.subject === subjectName)
+        );
 
-      const latestSubmission = await Submission.findOne({
-        student: studentId,
-        assignment: { $in: examIds },
-        status: 'Graded'
+        const latestExam = subGrades.find(s =>
+          ["exam", "quiz"].includes(s.type)
+        );
+
+        let examTitle = "No Exams";
+        let examScore = null;
+        let examTotal = null;
+
+        if (latestExam) {
+          examTitle =
+            latestExam.assignment?.title ||
+            latestExam.quiz?.title ||
+            "Test";
+          examScore = latestExam.obtainedMarks;
+          examTotal = latestExam.totalMarks;
+        }
+
+        const pendingCount = await Submission.countDocuments({
+          student: studentId,
+          subject: subjectName,
+          status: { $in: ["pending", "submitted", "in-progress"] }
+        });
+
+        return {
+          id: doc._id || subjectName.toLowerCase(),
+          name: subjectName,
+          teacher: doc.teacher?.name || "Unknown",
+          initials: subjectName.substring(0, 2).toUpperCase(),
+
+          notebook: pendingCount === 0 ? "Checked" : "Pending",
+
+          examName: examTitle,
+          examScore,
+          examTotal,
+          isExamDone: !!latestExam,
+
+          chapter:
+            doc.chapters.find(c => c.isCurrent)?.title ||
+            "No Active Chapter",
+
+          color: pendingCount === 0 ? "#16a34a" : "#f97316"
+        };
       })
-      .sort({ submittedAt: -1 })
-      .populate('assignment', 'title totalMarks');
+    );
 
-      return {
-        id: doc.subject.toLowerCase(),
-        name: doc.subject,
-        teacher: doc.teacher?.name || "Unknown",
-        initials: doc.subject.substring(0, 2).toUpperCase(),
-        
-        notebook: notebookStatus,
-        
-        examName: latestSubmission ? latestSubmission.assignment.title : "No Exams",
-        examScore: latestSubmission ? latestSubmission.obtainedMarks : null,
-        examTotal: latestSubmission ? latestSubmission.totalMarks : null,
-        isExamDone: !!latestSubmission,
-        
-        chapter: doc.chapters.find(c => c.isCurrent)?.title || "No Active Chapter",
-        color: notebookStatus === 'Checked' ? '#16a34a' : '#f97316' 
-      };
-    }));
+    console.log("✅ Student Report + Ranking Generated");
 
+    // --------------------------------------------------
+    // 7. RESPONSE
+    // --------------------------------------------------
     res.status(200).json({
       student: {
         id: student._id,
@@ -726,14 +909,23 @@ export const getStudentReport = async (req, res) => {
         rollNo: student.rollNo,
         className: student.className,
         mobile: student.mobile,
-        avatar: "https://ui-avatars.com/api/?name=" + student.name + "&background=eef2ff&color=4f46e5"
+        avatar:
+          student.profilePic ||
+          `https://ui-avatars.com/api/?name=${student.name}&background=eef2ff&color=4f46e5`
       },
       isClassTeacher,
+      ranking: {
+        currentRank,
+        totalStudents,
+        studentAvg: myAvg,
+        classAvg,
+        isAboveAvg: myAvg >= classAvg
+      },
       subjects: reportCards
     });
 
   } catch (error) {
-    console.error("Student Report Error:", error);
+    console.error("❌ Student Report Error:", error);
     res.status(500).json({ message: "Failed to generate student report" });
   }
 };

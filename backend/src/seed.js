@@ -4,10 +4,15 @@ import dotenv from "dotenv";
 import XLSX from "xlsx";
 import fs from "fs";
 
+// Import ALL Models to ensure complete cleanup
 import Teacher from "./models/teacher.model.js";
 import Student from "./models/student.model.js";
 import Syllabus from "./models/syllabus.model.js"; 
 import Assignment from "./models/assignment.model.js";
+import Announcement from "./models/announcement.model.js";
+import Fee from "./models/fee.model.js";
+import Quiz from "./models/quiz.model.js";
+import Submission from "./models/submission.model.js";
 
 dotenv.config({ path: "./.env" });
 
@@ -31,11 +36,22 @@ const seedData = async () => {
   await connectDB();
 
   try {
-    console.log("🧹 Clearing old data...");
-    await Teacher.deleteMany();
-    await Student.deleteMany();
-    await Syllabus.deleteMany(); 
-    await Assignment.deleteMany();
+    // --- 0. CLEAR DATABASE (The Purge) ---
+    console.log("🧹 Clearing ALL database collections...");
+    
+    // Delete data from all collections in parallel for speed
+    await Promise.all([
+        Teacher.deleteMany(),
+        Student.deleteMany(),
+        Syllabus.deleteMany(),
+        Assignment.deleteMany(),
+        Announcement.deleteMany(),
+        Fee.deleteMany(),
+        Quiz.deleteMany(),
+        Submission.deleteMany()
+    ]);
+    
+    console.log("✨ Database completely wiped.");
 
     const teacherExcelData = []; 
     const studentExcelData = [];

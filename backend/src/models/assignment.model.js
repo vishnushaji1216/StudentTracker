@@ -9,10 +9,12 @@ const AssignmentSchema = new mongoose.Schema({
 
   type: { 
     type: String, 
+    // Added 'exam' for Gradebook entries
     enum: ['homework', 'audio', 'quiz', 'exam'], 
     default: 'homework' 
   },
 
+  // Only used if type === 'quiz' (Links to question bank)
   quizId: { type: mongoose.Schema.Types.ObjectId, ref: 'Quiz' },
 
   status: { 
@@ -22,17 +24,45 @@ const AssignmentSchema = new mongoose.Schema({
   },
 
   scheduledAt: { type: Date },
-  duration: { type: Number, default: 30 },
-  passingScore: { type: Number, default: 40 },
 
-  targetType: { type: String, enum: ['all', 'range'], default: 'all' },
+  // --- CONDITIONAL VALIDATION (The Fix) ---
+  duration: { 
+    type: Number, 
+    required: function() { return this.type === 'quiz'; } 
+  },
+  passingScore: { 
+    type: Number, 
+    required: function() { return this.type === 'quiz'; } 
+  },
+
+  targetType: { 
+    type: String, 
+    enum: ['all', 'range'], 
+    default: 'all', 
+    required: function () {
+      return this.type === 'audio';
+    } 
+  },
+  
   rollRange: {
-    start: { type: Number },
-    end: { type: Number }
+    start: { 
+        type: Number,
+        required: function() { return this.targetType === 'range'; }
+    },
+    end: { 
+        type: Number,
+        required: function() { return this.targetType === 'range'; }
+    }
+  },
+
+  isOffline: { 
+    type: Boolean, 
+    default: false 
   },
 
   dueDate: { type: Date },
-  totalMarks: { type: Number, default: 100 }
+  totalMarks: { type: Number, default: 10 }
+
 }, { timestamps: true });
 
 export default mongoose.model('Assignment', AssignmentSchema);
