@@ -207,7 +207,7 @@ export const logAudioReview = async (req, res) => {
     submission.tags = tags || []; 
     submission.feedback = feedback || "";
     submission.teacher = teacherId; 
-    submission.status = 'Graded'; 
+    submission.status = 'graded'; 
     
     await submission.save();
 

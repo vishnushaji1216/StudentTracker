@@ -9,7 +9,6 @@ const AssignmentSchema = new mongoose.Schema({
 
   type: { 
     type: String, 
-    // Added 'exam' for Gradebook entries
     enum: ['homework', 'audio', 'quiz', 'exam'], 
     default: 'homework' 
   },
@@ -25,7 +24,7 @@ const AssignmentSchema = new mongoose.Schema({
 
   scheduledAt: { type: Date },
 
-  // --- CONDITIONAL VALIDATION (The Fix) ---
+  // --- CONDITIONAL VALIDATION ---
   duration: { 
     type: Number, 
     required: function() { return this.type === 'quiz'; } 
@@ -35,13 +34,12 @@ const AssignmentSchema = new mongoose.Schema({
     required: function() { return this.type === 'quiz'; } 
   },
 
+  // --- TARGETING ---
   targetType: { 
     type: String, 
     enum: ['all', 'range'], 
     default: 'all', 
-    required: function () {
-      return this.type === 'audio';
-    } 
+    required: function () { return this.type === 'audio'; } 
   },
   
   rollRange: {
@@ -55,14 +53,23 @@ const AssignmentSchema = new mongoose.Schema({
     }
   },
 
-  isOffline: { 
-    type: Boolean, 
-    default: false 
+  assignedCount: { 
+    type: Number, 
+    default: 0 
   },
 
+  isOffline: { type: Boolean, default: false },
   dueDate: { type: Date },
   totalMarks: { type: Number, default: 10 }
 
 }, { timestamps: true });
+
+AssignmentSchema.index(
+  { dueDate: 1 }, 
+  { 
+    expireAfterSeconds: 0, 
+    partialFilterExpression: { type: { $in: ['audio', 'homework'] } } 
+  }
+);
 
 export default mongoose.model('Assignment', AssignmentSchema);

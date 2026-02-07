@@ -31,6 +31,7 @@ import DailyTaskScreen from './src/screens/Teacher/DailyTaskScreen';
 import NoticeBoardScreen from './src/screens/Teacher/NoticeBoardScreen';
 import ResourceLibraryScreen from './src/screens/Teacher/ResourceLibraryScreen';
 import TeacherGradebookScreen from './src/screens/Teacher/TeacherGradebookScreen';
+import TeacherFeeStatus from './src/screens/Teacher/TeacherFeeStatus';
 
 // Quiz Screens
 import QuizDashboardScreen from './src/screens/Teacher/Quiz/QuizDashboardScreen';
@@ -127,6 +128,7 @@ export default function App() {
         <Stack.Screen name="NoticeBoard" component={NoticeBoardScreen} />
         <Stack.Screen name="ResourceLibrary" component={ResourceLibraryScreen} />
         <Stack.Screen name="TeacherGradebook" component={TeacherGradebookScreen} />
+        <Stack.Screen name="TeacherFeeStatus" component={TeacherFeeStatus} />
 
         {/* Quiz */}
         <Stack.Screen name="QuizDashboard" component={QuizDashboardScreen} />

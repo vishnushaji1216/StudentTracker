@@ -38,11 +38,12 @@ const StudentSchema = new mongoose.Schema({
     type: String,
     default: null
   },
-  // Link to Fee Schema: This allows you to store and populate fee details
   fees: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Fee'
   }],
+  isFeeLocked: { type: Boolean, default: false },
+  lockReason: { type: String, default: "" },
   stats: {
     avgScore: { type: Number, default: 0 }
   }

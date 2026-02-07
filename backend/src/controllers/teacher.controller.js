@@ -6,6 +6,7 @@ import Announcement from "../models/announcement.model.js";
 import Submission from "../models/submission.model.js"; 
 import Quiz from "../models/quiz.model.js";
 import sharp from "sharp";
+import mongoose from "mongoose";
 
 // --- 1. GET TEACHER'S CLASSES & PROFILE ---
 export const getTeacherProfile = async (req, res) => {
@@ -32,13 +33,13 @@ export const getMyClasses = async (req, res) => {
 
     // 2. Identify Classes
     const primaryClass = teacher.classTeachership; 
-    const assignedClasses = teacher.assignments; 
+    const assignedClasses = teacher.assignments || []; // Fallback to empty array
     
     // Get unique list of classes for student counting
     const subjectClassNames = assignedClasses.map(a => a.class);
     const allClassNames = [...new Set([primaryClass, ...subjectClassNames].filter(Boolean))];
 
-    // 3. Aggregate Student Counts (Keep this generic per class)
+    // 3. Aggregate Student Counts
     const classCounts = await Student.aggregate([
       { $match: { className: { $in: allClassNames } } },
       { $group: { _id: "$className", count: { $sum: 1 } } }
@@ -51,9 +52,14 @@ export const getMyClasses = async (req, res) => {
 
     const classesData = await Promise.all(assignedClasses.map(async (assign) => {
       // A. Syllabus Status
-      const syllabusDoc = await Syllabus.findOne({ teacher: teacherId, className: assign.class, subject: assign.subject });
+      const syllabusDoc = await Syllabus.findOne({ 
+          teacher: teacherId, 
+          className: assign.class, 
+          subject: assign.subject 
+      });
       const currentChapter = syllabusDoc?.chapters.find(ch => ch.isCurrent);
 
+      // B. Fetch Assignments for this specific Subject/Class
       const assignments = await Assignment.find({ 
         teacher: teacherId,
         className: assign.class,
@@ -63,16 +69,21 @@ export const getMyClasses = async (req, res) => {
 
       const assignmentIds = assignments.map(a => a._id);
 
+      // C. Fetch Graded Submissions
+      // FIX: Use lowercase 'graded'
       const submissions = await Submission.find({
         assignment: { $in: assignmentIds },
-        status: 'Graded'
+        status: { $in: ['graded', 'Graded'] } // Support both for safety
       }).select('obtainedMarks totalMarks assignment');
 
+      // D. Calculate Average
       let totalObtained = 0;
       let totalPossible = 0;
 
       submissions.forEach(sub => {
-        totalObtained += sub.obtainedMarks;
+        totalObtained += sub.obtainedMarks || 0;
+        
+        // FIX: Use Snapshot Total first, then Parent Total, then Default
         const parentAssign = assignments.find(a => a._id.toString() === sub.assignment.toString());
         const maxMarks = sub.totalMarks || parentAssign?.totalMarks || 100;
         
@@ -85,12 +96,14 @@ export const getMyClasses = async (req, res) => {
         : 0;
 
       return {
-        id: assign.class,
+        id: assign.class, // Unique Key
         name: `Class ${assign.class}`,
         subject: assign.subject,
         isClassTeacher: (assign.class === primaryClass),
         students: getStudentCount(assign.class),
-        avg: subjectAvg + "%", // <--- Returns subject-specific average
+        
+        avg: subjectAvg + "%", 
+        
         topic: currentChapter ? `Ch ${currentChapter.chapterNo}: ${currentChapter.title}` : "No Active Topic",
         notesStatus: currentChapter ? currentChapter.notesStatus : "Pending",
         quizStatus: currentChapter ? currentChapter.quizStatus : "Pending",
@@ -178,11 +191,25 @@ export const getTeacherSubjects = async (req, res) => {
 // --- 4. CREATE ASSIGNMENT/EXAM ---
 export const createAssignment = async (req, res) => {
   try {
-    const { className, subject, title, description, type, dueDate, totalMarks, targetType, rollStart, rollEnd } = req.body;
+    const { className, title, description, type, dueDate, totalMarks, targetType, rollStart, rollEnd } = req.body;
     const teacherId = req.user.id;
+
+    let subject = req.body.subject || "General";
+
+    if (type === 'audio') {
+      subject = "English"; 
+    }
 
     if (!className || !subject || !title) {
       return res.status(400).json({ message: "Class, Subject, and Title are required" });
+    }
+
+    let studentCount = 0;
+
+    if (targetType === 'range') {
+        studentCount = (Number(rollEnd) - Number(rollStart)) + 1;
+    } else {
+        studentCount = await Student.countDocuments({ className: className });
     }
 
     const newAssignment = new Assignment({
@@ -194,6 +221,7 @@ export const createAssignment = async (req, res) => {
       type: type || 'homework',
       dueDate,
       totalMarks: totalMarks || 20,
+      assignedCount: studentCount,
       targetType: targetType || 'all',
       rollRange: targetType === 'range' ? { start: Number(rollStart), end: Number(rollEnd) } : null,
       status: 'Active'
@@ -264,155 +292,85 @@ export const submitGradebook = async (req, res) => {
 // --- 6. DASHBOARD STATS ---
 export const getTeacherDashboardStats = async (req, res) => {
   try {
-    console.log("\n🔍 [TEACHER APP DEBUG] Fetching Dashboard Stats");
-
     const teacherId = req.user.id;
+    console.log("\n🔍 [DASHBOARD] Generating Resilient Stats...");
+
+    // 1. Identify Class
     const teacher = await Teacher.findById(teacherId);
-
-    if (!teacher) {
-      console.log("❌ Teacher not found");
-      return res.status(404).json({ message: "Teacher not found" });
-    }
-
-    const className =
-      teacher.classTeachership ||
-      (teacher.assignments?.[0] ? teacher.assignments[0].class : null);
-
-    console.log("🏫 Class Identified:", className);
-
-    if (!className) {
-      console.log("⚠️ No class assigned to teacher");
-      return res.status(200).json({
-        className: "N/A",
-        classPerformance: { currentAvg: 0, trend: 0, history: [] },
-        pendingTasks: { audio: 0, handwriting: 0, total: 0 }
-      });
-    }
+    const className = teacher?.classTeachership || "N/A";
 
     // --------------------------------------------------
-    // 🔎 DEBUG 1: Check subject field existence
+    // 1. GLOBAL AVERAGE (UNCHANGED)
     // --------------------------------------------------
-    const debugSubjects = await Submission.aggregate([
-      { $match: { status: { $in: ["graded", "Graded"] } } },
-      { $group: { _id: "$subject", count: { $sum: 1 } } }
+    const globalStats = await Submission.aggregate([
+      { 
+        $match: { 
+          teacher: new mongoose.Types.ObjectId(teacherId), 
+          status: { $in: ['graded', 'Graded'] } 
+        } 
+      },
+      { 
+        $group: { 
+          _id: null, 
+          avg: { $avg: { $multiply: [{ $divide: ["$obtainedMarks", "$totalMarks"] }, 100] } } 
+        } 
+      }
+    ]);
+    const globalAverage = globalStats.length > 0 ? Math.round(globalStats[0].avg) : 0;
+
+    // --------------------------------------------------
+    // 2. RESILIENT GRAPH DATA (THE FIX)
+    // --------------------------------------------------
+    // Instead of finding Assignments, we group Submissions by their 'assignment' ID.
+    // This reconstructs the "Exam" even if the Assignment document was deleted.
+    const graphStats = await Submission.aggregate([
+        // A. Filter: Graded work for this teacher
+        { 
+            $match: { 
+                teacher: new mongoose.Types.ObjectId(teacherId),
+                status: { $in: ['graded', 'Graded'] } 
+            } 
+        },
+        // B. Group by Assignment ID (Re-grouping the exam papers)
+        { 
+            $group: {
+                _id: "$assignment", // Group by the exam ID
+                avgScore: { $avg: { $multiply: [{ $divide: ["$obtainedMarks", "$totalMarks"] }, 100] } },
+                subject: { $first: "$subject" }, // Grab the subject (e.g. "Math")
+                date: { $max: "$submittedAt" }   // Use the latest submission time as date
+            }
+        },
+        // C. Sort by Date (Oldest to Newest)
+        { $sort: { date: 1 } } 
     ]);
 
-    console.log("📊 Subjects found in submissions:", debugSubjects);
+    // Take the last 3 events
+    const recentHistory = graphStats.slice(-3).map(stat => ({
+        id: stat._id,
+        // If Title is lost (deleted assignment), use Subject + Date
+        label: stat.subject || "Exam", 
+        score: Math.round(stat.avgScore),
+        date: stat.date
+    }));
 
-    if (debugSubjects.length === 0) {
-      console.log("⚠️ No subject field found in submissions");
-    }
-
-    // --------------------------------------------------
-    // ORIGINAL LOGIC STARTS HERE
-    // --------------------------------------------------
-
-    const assignments = await Assignment.find({
-      className,
-      type: { $in: ["exam", "quiz"] },
-      status: { $in: ["Completed", "Active"] }
-    }).select("title type createdAt totalMarks");
-
-    const quizzes = await Quiz.find({ teacher: teacherId }).select(
-      "title totalMarks createdAt"
-    );
-
-    let allEvents = [
-      ...assignments.map(a => ({ ...a.toObject(), category: "assignment" })),
-      ...quizzes.map(q => ({ ...q.toObject(), category: "quiz" }))
-    ];
-
-    allEvents.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-
-    let totalObtainedGlobal = 0;
-    let totalPossibleGlobal = 0;
-    let eventStats = [];
-
-    for (const event of allEvents) {
-      const query = { status: { $in: ["graded", "Graded"] } };
-
-      if (event.category === "assignment") query.assignment = event._id;
-      else query.quiz = event._id;
-
-      const submissions = await Submission.find(query).select(
-        "obtainedMarks totalMarks subject"
-      );
-
-      console.log(
-        `📝 ${event.title} → Submissions Found:`,
-        submissions.length
-      );
-
-      if (submissions.length > 0) {
-        let eventObtained = 0;
-        let eventTotal = 0;
-
-        submissions.forEach(s => {
-          eventObtained += s.obtainedMarks || 0;
-          eventTotal += s.totalMarks || event.totalMarks || 100;
-        });
-
-        const eventAvg =
-          eventTotal > 0 ? (eventObtained / eventTotal) * 100 : 0;
-
-        eventStats.push({
-          id: event._id,
-          label: event.title,
-          score: Math.round(eventAvg),
-          date: event.createdAt
-        });
-
-        totalObtainedGlobal += eventObtained;
-        totalPossibleGlobal += eventTotal;
-      }
-    }
-
-    const globalAverage =
-      totalPossibleGlobal > 0
-        ? Math.round((totalObtainedGlobal / totalPossibleGlobal) * 100)
-        : 0;
-
-    console.log("📈 Global Average:", globalAverage);
-
-    const graphData = eventStats.slice(-3); // Last 3 events
-
-    console.log("📊 Graph Data (Last 3 Events):", graphData);
-
-    let trend = 0;
-    if (eventStats.length >= 2) {
-      const latest = eventStats[eventStats.length - 1].score;
-      const previous = eventStats[eventStats.length - 2].score;
-      trend = latest - previous;
-    }
-
-    console.log("📉 Performance Trend:", trend);
+    console.log("📊 Resilient Graph Data:", recentHistory);
 
     // --------------------------------------------------
-    // Pending Tasks
+    // 3. PENDING TASKS
     // --------------------------------------------------
-    const pendingAudio = await Submission.countDocuments({
+    const pendingQuery = {
       teacher: teacherId,
-      type: "audio",
-      status: "Submitted"
-    });
-
-    const pendingHandwriting = await Submission.countDocuments({
-      teacher: teacherId,
-      type: "handwriting",
-      status: "Submitted"
-    });
-
-    console.log("⏳ Pending Tasks:", {
-      audio: pendingAudio,
-      handwriting: pendingHandwriting
-    });
+      status: { $in: ['submitted', 'pending', 'Submitted', 'Pending'] }
+    };
+    const pendingAudio = await Submission.countDocuments({ ...pendingQuery, type: 'audio' });
+    const pendingHandwriting = await Submission.countDocuments({ ...pendingQuery, type: 'handwriting' });
 
     res.json({
       className,
       classPerformance: {
         currentAvg: globalAverage,
-        trend,
-        history: graphData
+        trend: 0, 
+        history: recentHistory
       },
       pendingTasks: {
         audio: pendingAudio,
@@ -422,8 +380,8 @@ export const getTeacherDashboardStats = async (req, res) => {
     });
 
   } catch (error) {
-    console.error("❌ Teacher Dashboard Stats Error:", error);
-    res.status(500).json({ message: "Failed to load dashboard stats" });
+    console.error("❌ Dashboard Error:", error);
+    res.status(500).json({ message: "Error loading dashboard" });
   }
 };
 
@@ -431,8 +389,24 @@ export const getTeacherDashboardStats = async (req, res) => {
 export const getAssignments = async (req, res) => {
   try {
     const teacherId = req.user.id;
-    const assignments = await Assignment.find({ teacher: teacherId, status: { $ne: 'Draft' }}).sort({ createdAt: -1 });
-    res.status(200).json(assignments);
+    const assignments = await Assignment.find({ 
+      teacher: teacherId, 
+      status: { $ne: 'Draft' },
+      isOffline: { $ne: true } 
+  }).sort({ createdAt: -1 });
+
+    const dataWithCounts = await Promise.all(assignments.map(async (task) => {
+      const count = await Submission.countDocuments({ 
+          assignment: task._id,
+          status: { $in: ['submitted', 'graded', 'Submitted', 'Graded'] }
+      });
+      
+      return {
+          ...task.toObject(),
+          submissionCount: count 
+      };
+  }));
+    res.status(200).json(dataWithCounts);
   } catch (error) {
     res.status(500).json({ message: "Failed to fetch assignments" });
   }
@@ -964,5 +938,65 @@ export const getClassSubjects = async (req, res) => {
   } catch (error) {
     console.error("Error fetching class subjects:", error);
     res.status(500).json({ message: "Failed to fetch subjects" });
+  }
+};
+
+export const getMyClassDefaulters = async (req, res) => {
+  try {
+    const teacherId = req.user.id;
+
+    // 1. Verify Teacher and their assigned class
+    const teacher = await Teacher.findById(teacherId);
+
+    if (!teacher || !teacher.classTeachership) {
+      return res.status(403).json({ 
+        message: "Access Denied: Only Class Teachers (In-charges) can view fee status." 
+      });
+    }
+
+    const className = teacher.classTeachership;
+
+    // 2. Find students in this class
+    // We populate the 'fees' array, but only with those that are NOT fully paid
+    const students = await Student.find({ className })
+      .select('name rollNo mobile isFeeLocked profilePic fees')
+      .populate({
+        path: 'fees',
+        match: { remainingAmount: { $gt: 0 } }, // Filter individual fee docs with balance
+        select: 'title remainingAmount dueDate status'
+      });
+
+    // 3. Format data for the mobile UI
+    // We only want to send students who actually have at least one pending fee item
+    const defaulters = students
+      .filter(student => student.fees && student.fees.length > 0)
+      .map(student => {
+        // Calculate total for the card summary, though UI shows individual items
+        const totalPending = student.fees.reduce((sum, fee) => sum + fee.remainingAmount, 0);
+
+        return {
+          id: student._id,
+          name: student.name,
+          rollNo: student.rollNo || "N/A",
+          mobile: student.mobile,
+          isLocked: student.isFeeLocked,
+          profilePic: student.profilePic,
+          totalPending,
+          pendingFees: student.fees // Individual breakdown (Tuition, Bus, etc.)
+        };
+      });
+
+    // Sort by highest debt first to help teacher prioritize follow-ups
+    defaulters.sort((a, b) => b.totalPending - a.totalPending);
+
+    res.status(200).json({
+      className,
+      defaulterCount: defaulters.length,
+      defaulters
+    });
+
+  } catch (error) {
+    console.error("❌ Teacher Defaulter API Error:", error);
+    res.status(500).json({ message: "Server error fetching class fee status" });
   }
 };

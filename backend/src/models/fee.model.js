@@ -3,40 +3,54 @@ import mongoose from "mongoose";
 const feeSchema = new mongoose.Schema({
   student: { type: mongoose.Schema.Types.ObjectId, ref: 'Student', required: true },
   className: { type: String, required: true },
-  title: { type: String, required: true }, // e.g., "Annual Bus Fee"
+  title: { type: String, required: true }, // e.g., "Term 1 Tuition"
   
-  // The Money Logic
-  totalAmount: { type: Number, required: true }, // e.g., 10,000
-  paidAmount: { type: Number, default: 0 },      // e.g., 4,000
-  remainingAmount: { type: Number, required: true }, // e.g., 6,000 (Auto-calc)
+  // Money Logic
+  totalAmount: { type: Number, required: true },
+  paidAmount: { type: Number, default: 0 },
+  remainingAmount: { type: Number, required: true }, // Auto-calc
   
   dueDate: { type: Date, required: true },
   
-  // Status is derived from amounts
+  // Status
   status: { 
     type: String, 
     enum: ['Pending', 'Partial', 'Paid', 'Overdue'], 
     default: 'Pending' 
   },
   
-  remarks: { type: String } // e.g., "Scholarship Applied", "Route 5 Bus"
+  // Payment History (The Ledger)
+  transactions: [{
+    amount: { type: Number, required: true },
+    date: { type: Date, default: Date.now },
+    mode: { type: String, enum: ['Cash', 'Online', 'UPI', 'Cheque'], default: 'Cash' },
+    note: String // e.g., "Paid by Father via GPay"
+  }],
+
+  remarks: { type: String } // General notes like "Scholarship Applied"
+
 }, { timestamps: true });
 
-// Middleware to auto-calculate remainingAmount before saving
+// --- MIDDLEWARE: Auto-Calculate Balance & Status ---
 feeSchema.pre('save', function(next) {
+  // 1. Calculate Remaining
   this.remainingAmount = this.totalAmount - this.paidAmount;
+  
+  // 2. Determine Status
+  const now = new Date();
   
   if (this.remainingAmount <= 0) {
     this.status = 'Paid';
-    this.remainingAmount = 0;
-  } else if (this.paidAmount > 0 && this.dueDate >= new Date()) {
+    this.remainingAmount = 0; // Prevent negative numbers
+  } else if (this.paidAmount > 0) {
     this.status = 'Partial';
-  } else if (this.dueDate < new Date()) {
+  } else if (this.dueDate < now) {
     this.status = 'Overdue';
+  } else {
+    this.status = 'Pending';
   }
   
   next();
 });
 
-const Fee = mongoose.model("Fee", feeSchema);
-export default Fee;
+export default mongoose.model("Fee", feeSchema);

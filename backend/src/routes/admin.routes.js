@@ -12,6 +12,15 @@ import {
   getTeacherDetail, 
   updateTeacherProfile
 } from "../controllers/admin.controller.js";
+
+import {
+  assignFee, 
+  recordPayment, 
+  toggleStudentLock, 
+  getStudentFees,
+  getFeeDashboardStats
+} from '../controllers/fee.controller.js';
+
 import auth from "../middleware/auth.middleware.js";
 
 const router = express.Router();
@@ -49,5 +58,12 @@ router.put("/student/:id", auth, adminCheck, updateStudentProfile);
 router.post('/broadcast', auth, adminCheck, sendBroadcast);
 router.get('/broadcast-history', auth, adminCheck, getBroadcastHistory);
 router.delete('/broadcast/:id', auth, adminCheck, deleteNotice);
+
+//FEE
+router.post('/fees/assign', assignFee);          
+router.post('/fees/pay', recordPayment);         
+router.post('/fees/lock', toggleStudentLock);    
+router.get('/fees/student/:studentId', getStudentFees);
+router.get('/fees/dashboard', getFeeDashboardStats);
 
 export default router;

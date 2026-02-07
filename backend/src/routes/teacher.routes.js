@@ -19,7 +19,8 @@ import {
   getTeacherSubjects,
   getTeacherDashboardStats,
   getStudentReport,
-  getClassSubjects
+  getClassSubjects,
+  getMyClassDefaulters
 } from "../controllers/teacher.controller.js";
 import { 
    logHandwritingReview, 
@@ -99,5 +100,5 @@ router.get("/queue/handwriting", auth, teacherCheck, getHandwritingQueue);
 router.delete("/log/handwriting/:submissionId", auth, teacherCheck, deleteHandwritingReview);
 router.get("/queue/audio", auth, teacherCheck, getAudioQueue);
 router.post("/log/audio", auth, teacherCheck, logAudioReview);
-
+router.get('/my-class-defaulters', auth, teacherCheck, getMyClassDefaulters);
 export default router;

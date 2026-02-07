@@ -324,6 +324,7 @@ export const getStudentStats = async (req, res) => {
 
 export const submitAssignment = async (req, res) => {
   try {
+    // 1. Validation: Ensure File Exists
     if (!req.file) {
       return res.status(400).json({ message: "No file uploaded" });
     }
@@ -334,6 +335,7 @@ export const submitAssignment = async (req, res) => {
 
     console.log(`📂 Processing ${type} submission for Student ${studentId}`);
 
+    // 2. Upload to Supabase
     const fileBuffer = fs.readFileSync(file.path);
     const fileExt = file.originalname.split('.').pop();
     const uniqueFileName = `${studentId}_${Date.now()}.${fileExt}`;
@@ -346,39 +348,75 @@ export const submitAssignment = async (req, res) => {
       folderName
     );
 
-    fs.unlinkSync(file.path);
+    // Clean up local file immediately after upload
+    try { fs.unlinkSync(file.path); } catch (e) { console.error("File cleanup error:", e); }
 
-    // Fetch assignment to set totalMarks snapshot
+    // 3. Fetch Assignment (Crucial for Metadata)
     const assignment = await Assignment.findById(assignmentId);
-    const maxMarks = assignment ? assignment.totalMarks : 5;
+    
+    if (!assignment) {
+        return res.status(404).json({ message: "Assignment not found or expired" });
+    }
 
+    // --- THE FIX: DETERMINE SUBJECT ---
+    // If assignment has a subject, use it. 
+    // If missing (Old Data), force 'English' for audio or 'General' for others.
+    let finalSubject = assignment.subject;
+    
+    if (!finalSubject) {
+        if (type === 'audio' || assignment.type === 'audio') {
+            finalSubject = "English";
+        } else {
+            finalSubject = "General";
+        }
+        console.log(`⚠️ Old assignment detected. Defaulting subject to: ${finalSubject}`);
+    }
+    // ----------------------------------
+
+    const maxMarks = assignment.totalMarks || 5;
+
+    // 4. Update or Create Submission
     let submission = await Submission.findOne({ 
       student: studentId, 
       assignment: assignmentId 
     });
 
     if (submission) {
+      // Update existing submission
       submission.fileUrl = publicUrl;
       submission.status = 'submitted'; // consistent lowercase
       submission.submittedAt = Date.now();
+      
+      // Update metadata (fix old submissions if they are re-submitting)
+      submission.subject = finalSubject;
+      submission.title = assignment.title;
+      
       await submission.save();
     } else {
+      // Create new submission
       submission = await Submission.create({
         student: studentId,
         assignment: assignmentId,
         type: type, 
         fileUrl: publicUrl,
         status: 'submitted',
-        totalMarks: maxMarks, // <--- Set Snapshot
+        
+        // Snapshot Data (The Fix)
+        totalMarks: maxMarks,
+        subject: finalSubject, // <--- Resolves "Path `subject` is required"
+        title: assignment.title,
+        
         submittedAt: Date.now()
       });
     }
 
+    console.log(`✅ Saved ${type} submission for ${finalSubject}`);
     res.status(201).json({ message: "Assignment submitted successfully!", submission });
 
   } catch (error) {
     console.error("❌ Submission Controller Error:", error);
-    if (req.file && req.file.path) {
+    // Cleanup file if error occurred before unlink
+    if (req.file && req.file.path && fs.existsSync(req.file.path)) {
         try { fs.unlinkSync(req.file.path); } catch(e) {}
     }
     res.status(500).json({ message: "Server error during submission" });

@@ -5,7 +5,8 @@ import Sidebar from './components/Sidebar';
 import UserOnboarding from './pages/UserOnboarding';
 import Registry from './pages/Registry';
 import StudentDetail from './pages/StudentDetail';
-import TeacherDetail from './pages/TeacherDetail'; // We will build this next
+import TeacherDetail from './pages/TeacherDetail';
+import FeeDashboard from './pages/FeeDashboard'; // Imported
 
 // Layout Wrapper
 const AdminLayout = ({ children }) => (
@@ -41,7 +42,12 @@ function App() {
           <ProtectedRoute><AdminLayout><Registry /></AdminLayout></ProtectedRoute>
         } />
 
-        {/* --- DETAIL ROUTES (The Missing Link) --- */}
+        {/* --- FEE DASHBOARD ROUTE --- */}
+        <Route path="/feedashboard" element={
+          <ProtectedRoute><AdminLayout><FeeDashboard /></AdminLayout></ProtectedRoute>
+        } />
+
+        {/* --- DETAIL ROUTES --- */}
         <Route path="/student/:id" element={
           <ProtectedRoute><AdminLayout><StudentDetail /></AdminLayout></ProtectedRoute>
         } />

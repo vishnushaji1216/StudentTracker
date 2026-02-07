@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, UserPlus, Users, FileText, LogOut, Settings } from 'lucide-react';
+import { LayoutDashboard, UserPlus, Users, FileText, LogOut, Settings, Banknote } from 'lucide-react';
 import '../index.css';
 
 const Sidebar = () => {
@@ -56,6 +56,9 @@ const Sidebar = () => {
         </NavLink>
         <NavLink to="/registry" style={({isActive}) => styles.link(isActive)}>
           <Users size={20} /> Registry
+        </NavLink>
+        <NavLink to="/feedashboard" style={({isActive}) => styles.link(isActive)}>
+          <Banknote size={20} /> Fee DashBoard
         </NavLink>
       </nav>
 

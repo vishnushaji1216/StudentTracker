@@ -20,7 +20,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import FontAwesome5 from "react-native-vector-icons/FontAwesome5";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import api from "../../services/api";
-import TeacherSidebar from "../../components/TeacherSidebar"; // 1. Import Sidebar
+import TeacherSidebar from "../../components/TeacherSidebar"; 
 
 // Enable Animations
 if (Platform.OS === 'android') {
@@ -60,6 +60,7 @@ export default function DailyTaskScreen({ navigation }) {
   const [selectedClass, setSelectedClass] = useState('');
   const [myClasses, setMyClasses] = useState([]);
   const [taskTitle, setTaskTitle] = useState('');
+  const [duration, setDuration] = useState(''); // <--- NEW: Duration State
   const [creating, setCreating] = useState(false);
   
   // Range State
@@ -84,7 +85,7 @@ export default function DailyTaskScreen({ navigation }) {
         closeCreatePanel();
         return true;
       }
-      navigation.navigate('TeacherDash'); // Go back to Dash otherwise
+      navigation.navigate('TeacherDash'); 
       return true;
     });
     return () => backHandler.remove();
@@ -117,23 +118,13 @@ export default function DailyTaskScreen({ navigation }) {
 
   const fetchClasses = async () => {
     try {
-      // 2. Fetch from Correct Endpoint
       const response = await api.get('/teacher/classes');
-      
-      // 3. Parse NEW JSON Structure
-      // The API now returns: { profile: {...}, summary: {...}, classes: [{ id: '9-A', ... }] }
       const fetchedClasses = response.data.classes || [];
-      
-      // Extract just the class IDs (names) for the dropdown
-      // Using a Set to ensure uniqueness, though the API likely handles this
       const classNames = fetchedClasses.map(c => c.id);
-      
       setMyClasses(classNames);
-      
       if (classNames.length > 0) {
         setSelectedClass(classNames[0]);
       }
-
     } catch (error) {
       console.error("Fetch Classes Error:", error);
       showToast("Could not load class list", "error");
@@ -204,17 +195,31 @@ export default function DailyTaskScreen({ navigation }) {
 
     setCreating(true);
     try {
-      // 1. Calculate End of Day (e.g., 11:59 PM Tonight)
-      const deadline = new Date();
-      deadline.setHours(23, 59, 59, 999); 
-      // OR set it to tomorrow if you prefer: deadline.setDate(deadline.getDate() + 1);
+      // --- LOGIC: CALCULATE DEADLINE ---
+      const now = new Date();
+      const endOfDay = new Date();
+      endOfDay.setHours(23, 59, 59, 999);
+
+      let finalDeadline = endOfDay; // Default: End of today
+
+      if (duration && !isNaN(duration)) {
+          // If user entered hours (e.g., 2 hours)
+          const durationMs = Number(duration) * 60 * 60 * 1000;
+          const calculatedTime = new Date(now.getTime() + durationMs);
+          
+          // Rule: If calculated time > end of day, cap it at end of day
+          // Rule: If calculated time is valid, use it.
+          if (calculatedTime < endOfDay) {
+              finalDeadline = calculatedTime;
+          }
+      }
 
       const payload = {
         className: selectedClass,
         subject: "General", 
         title: taskTitle,
         type: taskType,
-        dueDate: deadline, // <--- FIXED: Now allows the task to survive the day
+        dueDate: finalDeadline, // Backend will use this to expire/delete the task
         targetType: assignMode, 
         rollStart: assignMode === 'range' ? rollStart : null,
         rollEnd: assignMode === 'range' ? rollEnd : null
@@ -222,12 +227,13 @@ export default function DailyTaskScreen({ navigation }) {
 
       await api.post('/teacher/assignments', payload);
 
-      showToast("Task assigned successfully!", "success");
+      showToast(`Task assigned! Ends at ${finalDeadline.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`, "success");
       
       closeCreatePanel();
       setTaskTitle('');
       setRollStart('');
       setRollEnd('');
+      setDuration(''); // Reset duration
       setAssignMode('all');
       fetchTasks(); 
 
@@ -259,6 +265,10 @@ export default function DailyTaskScreen({ navigation }) {
     if (isAudio) { icon = 'microphone'; color = '#4f46e5'; bg = '#eef2ff'; } 
     else if (isQuiz) { icon = 'list-check'; color = '#64748b'; bg = '#f8fafc'; }
 
+    // Format deadline
+    const deadline = new Date(item.dueDate);
+    const timeString = deadline.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
     return (
       <View style={[styles.card, { borderLeftColor: color }]}>
         <View style={styles.cardHeader}>
@@ -283,8 +293,13 @@ export default function DailyTaskScreen({ navigation }) {
         {isAudio ? (
           <View style={styles.progressContainer}>
             <View style={styles.progressLabels}>
-              <Text style={styles.progressText}>0/{item.totalMarks || 10} Submitted</Text>
-              <Text style={styles.progressText}>0%</Text>
+              {/* Show Time Remaining or Due Time */}
+              <Text style={[styles.progressText, {color: color}]}>
+                 <FontAwesome5 name="clock" size={10} /> Ends: {timeString}
+              </Text>
+              <Text style={styles.progressText}>
+                {item.submissionCount || 0}/{item.assignedCount || '?'} Submitted
+              </Text>
             </View>
             <View style={styles.progressBarBg}>
               <View style={[styles.progressBarFill, { width: '5%', backgroundColor: color }]} />
@@ -293,7 +308,7 @@ export default function DailyTaskScreen({ navigation }) {
         ) : (
           <View style={styles.avatarsRow}>
             <Text style={styles.pendingLabel}>
-              Due: {new Date(item.dueDate).toLocaleDateString()}
+              Due: {deadline.toLocaleDateString()} at {timeString}
             </Text>
           </View>
         )}
@@ -305,7 +320,7 @@ export default function DailyTaskScreen({ navigation }) {
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#fff" />
 
-      {/* --- 4. REPLACED HARDCODED SIDEBAR WITH COMPONENT --- */}
+      {/* --- SIDEBAR --- */}
       <TeacherSidebar 
         isOpen={isSidebarOpen}
         onClose={() => setIsSidebarOpen(false)}
@@ -324,14 +339,6 @@ export default function DailyTaskScreen({ navigation }) {
               <Text style={styles.headerTitle}>Daily Planner</Text>
             </View>
           </View>
-          {/* <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingRight: 20 }}>
-            {dateList.map((date) => (
-                <TouchableOpacity key={date.id} style={[styles.dateItem, date.active && styles.dateItemActive]}>
-                    <Text style={[styles.dateDay, date.active && styles.textWhite]}>{date.day}</Text>
-                    <Text style={[styles.dateNum, date.active && styles.textWhite]}>{date.num}</Text>
-                </TouchableOpacity>
-            ))}
-          </ScrollView> */}
         </View>
 
         <View style={styles.contentContainer}>
@@ -388,9 +395,9 @@ export default function DailyTaskScreen({ navigation }) {
             pointerEvents="none" 
           >
              <FontAwesome5 
-                name={toast.type === 'error' ? 'exclamation-circle' : 'check-circle'} 
-                size={16} 
-                color="#fff" 
+               name={toast.type === 'error' ? 'exclamation-circle' : 'check-circle'} 
+               size={16} 
+               color="#fff" 
              />
              <Text style={styles.toastText}>{toast.message}</Text>
           </Animated.View>
@@ -467,11 +474,36 @@ export default function DailyTaskScreen({ navigation }) {
                   </View>
               )}
 
-              {/* Title Input */}
-              <View style={styles.inputGroup}>
-                 <Text style={styles.label}>TITLE / DESCRIPTION</Text>
-                 <TextInput style={styles.input} placeholder={taskType === 'audio' ? "e.g. Recite Poem 5" : "e.g. Solve pg 42"} placeholderTextColor="#cbd5e1" value={taskTitle} onChangeText={setTaskTitle} />
+              {/* Title & Duration Input */}
+              <View style={[styles.inputGroup, { flexDirection: 'row', gap: 10 }]}>
+                 <View style={{ flex: 2 }}>
+                     <Text style={styles.label}>TITLE / DESCRIPTION</Text>
+                     <TextInput 
+                        style={styles.input} 
+                        placeholder={taskType === 'audio' ? "e.g. Recite Poem 5" : "e.g. Solve pg 42"} 
+                        placeholderTextColor="#cbd5e1" 
+                        value={taskTitle} 
+                        onChangeText={setTaskTitle} 
+                     />
+                 </View>
+                 
+                 {/* NEW: DURATION INPUT */}
+                 <View style={{ flex: 1 }}>
+                     <Text style={styles.label}>LIMIT (HOURS)</Text>
+                     <TextInput 
+                        style={styles.input} 
+                        placeholder="End of Day" 
+                        placeholderTextColor="#cbd5e1" 
+                        keyboardType="numeric"
+                        value={duration} 
+                        onChangeText={setDuration} 
+                     />
+                 </View>
               </View>
+              {/* Note about duration */}
+              <Text style={{fontSize:10, color:'#94a3b8', marginTop:-10, marginBottom:16}}>
+                 {duration ? `Submission window closes in ${duration} hours.` : "Available until 11:59 PM today."}
+              </Text>
 
               <TouchableOpacity style={[styles.assignBtn, creating && {opacity:0.7}]} onPress={handleAssign} disabled={creating}>
                  {creating ? <ActivityIndicator color="#fff"/> : <Text style={styles.assignBtnText}>Assign Task</Text>}
