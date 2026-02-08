@@ -19,7 +19,7 @@ import FontAwesome5 from "react-native-vector-icons/FontAwesome5";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect } from "@react-navigation/native";
 import api from "../../services/api";
-import StudentSidebar from "../../components/StudentSidebar"; // <--- Import Component
+import StudentSidebar from "../../components/StudentSidebar"; 
 
 if (Platform.OS === 'android') {
   if (UIManager.setLayoutAnimationEnabledExperimental) {
@@ -35,7 +35,7 @@ export default function StudentProfileScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [profileData, setProfileData] = useState({
-    profile: { name: "", className: "", rollNo: "", initials: "", profilePic: null },
+    profile: { name: "", className: "", rollNo: "", initials: "", profilePic: null, fees: [], isFeeLocked: false },
     siblings: [],
     teachers: []
   });
@@ -99,32 +99,8 @@ export default function StudentProfileScreen({ navigation }) {
   };
 
   const handleAudioPress = async () => {
-      // Quick check for active audio task
-      try {
-          const res = await api.get('/student/dashboard');
-          const { dailyMission, pendingList } = res.data;
-          
-          if (dailyMission && dailyMission.type === 'audio') {
-              navigation.navigate('AudioRecorder', { 
-                  assignmentId: dailyMission.id || dailyMission._id, 
-                  taskTitle: dailyMission.title 
-              });
-              return;
-          }
-          
-          const pendingAudio = pendingList.find(t => t.type === 'audio');
-          if (pendingAudio) {
-              navigation.navigate('AudioRecorder', { 
-                  assignmentId: pendingAudio.id || pendingAudio._id, 
-                  taskTitle: pendingAudio.title 
-              });
-              return;
-          }
-          
-          alert("No active audio tasks found.");
-      } catch (e) {
-          console.error("Audio check failed", e);
-      }
+      // Audio logic placeholder
+      alert("Check Dashboard for Audio Tasks");
   };
 
   const handleSwitchAccount = async (siblingId) => {
@@ -171,6 +147,8 @@ export default function StudentProfileScreen({ navigation }) {
   }
 
   const { profile, siblings, teachers } = profileData;
+  const pendingFees = profile.fees || [];
+  const totalDue = pendingFees.reduce((sum, item) => sum + item.remainingAmount, 0);
 
   return (
     <View style={styles.container}>
@@ -181,7 +159,7 @@ export default function StudentProfileScreen({ navigation }) {
         isOpen={isSidebarOpen}
         onClose={() => setIsSidebarOpen(false)}
         navigation={navigation}
-        activeRoute="" // No active route highlight for Profile usually, or create a 'StudentProfile' key
+        activeRoute="" 
         userInfo={profile}
         onLogout={handleLogout}
         onAudioPress={handleAudioPress}
@@ -215,9 +193,53 @@ export default function StudentProfileScreen({ navigation }) {
               </View>
               <Text style={styles.profileName}>{profile.name}</Text>
               <Text style={styles.profileClass}>{profile.className} • Roll No. {profile.rollNo}</Text>
+              
+              {/* App Lock Status Indicator */}
+              {profile.isFeeLocked && (
+                  <View style={styles.lockedBadge}>
+                      <FontAwesome5 name="lock" size={10} color="#dc2626" />
+                      <Text style={styles.lockedText}>APP ACCESS RESTRICTED</Text>
+                  </View>
+              )}
             </View>
 
-            {/* 2. Sibling Switcher */}
+            {/* 2. FEE STATUS SECTION (NEW) */}
+            <Text style={styles.sectionTitle}>FINANCIAL STATUS</Text>
+            {pendingFees.length > 0 ? (
+                <View style={styles.feeCard}>
+                    <View style={styles.feeHeader}>
+                        <Text style={styles.feeLabel}>TOTAL DUE</Text>
+                        <Text style={styles.feeTotal}>₹{totalDue.toLocaleString()}</Text>
+                    </View>
+                    
+                    <View style={styles.feeDivider} />
+                    
+                    {pendingFees.map((fee, index) => (
+                        <View key={index} style={styles.feeRow}>
+                            <View style={{flex: 1}}>
+                                <Text style={styles.feeTitle}>{fee.title}</Text>
+                                <Text style={styles.feeDate}>Due: {new Date(fee.dueDate).toLocaleDateString()}</Text>
+                            </View>
+                            <Text style={styles.feeAmount}>₹{fee.remainingAmount}</Text>
+                        </View>
+                    ))}
+
+                    <View style={styles.warningBox}>
+                        <FontAwesome5 name="exclamation-circle" size={12} color="#b45309" />
+                        <Text style={styles.warningText}>Please clear dues to avoid interruptions.</Text>
+                    </View>
+                </View>
+            ) : (
+                <View style={styles.feeCleanCard}>
+                    <FontAwesome5 name="check-circle" size={24} color="#10b981" />
+                    <View>
+                        <Text style={styles.feeCleanTitle}>All Clear!</Text>
+                        <Text style={styles.feeCleanSub}>No pending fees at this moment.</Text>
+                    </View>
+                </View>
+            )}
+
+            {/* 3. Sibling Switcher */}
             {siblings.length > 0 && (
               <>
                 <Text style={styles.sectionTitle}>SWITCH ACCOUNT</Text>
@@ -258,7 +280,7 @@ export default function StudentProfileScreen({ navigation }) {
               </>
             )}
 
-            {/* 3. My Teachers */}
+            {/* 4. My Teachers */}
             <Text style={styles.sectionTitle}>MY TEACHERS</Text>
             <View style={styles.teacherList}>
               {teachers.length > 0 ? teachers.map((teacher) => (
@@ -299,7 +321,7 @@ export default function StudentProfileScreen({ navigation }) {
               )}
             </View>
 
-            {/* 4. Logout */}
+            {/* 5. Logout */}
             <TouchableOpacity style={styles.signOutBtn} onPress={handleLogout}>
                <FontAwesome5 name="sign-out-alt" size={14} color="#ef4444" />
                <Text style={styles.signOutText}>Sign Out</Text>
@@ -309,22 +331,6 @@ export default function StudentProfileScreen({ navigation }) {
 
           </View>
         </ScrollView>
-
-        {/* BOTTOM NAV */}
-        <View style={styles.bottomNav}>
-          <TouchableOpacity 
-            style={styles.navItem} 
-            onPress={() => navigation.navigate('StudentDash')}
-          >
-            <FontAwesome5 name="home" size={20} color="#94a3b8" />
-            <Text style={styles.navLabel}>Home</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.navItem}>
-            <FontAwesome5 name="user" size={20} color="#4f46e5" />
-            <Text style={[styles.navLabel, { color: '#4f46e5' }]}>Profile</Text>
-          </TouchableOpacity>
-        </View>
 
       </SafeAreaView>
     </View>
@@ -350,9 +356,28 @@ const styles = StyleSheet.create({
   avatarTextLarge: { fontSize: 28, fontWeight: 'bold', color: '#4f46e5' },
   profileName: { fontSize: 20, fontWeight: 'bold', color: '#1e293b', marginBottom: 4 },
   profileClass: { fontSize: 14, color: '#64748b', fontWeight: '500' },
+  lockedBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#fef2f2', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, marginTop: 12 },
+  lockedText: { fontSize: 10, fontWeight: 'bold', color: '#dc2626' },
 
   /* Section Title */
   sectionTitle: { fontSize: 11, fontWeight: 'bold', color: '#94a3b8', marginBottom: 8, marginLeft: 4, letterSpacing: 0.5 },
+
+  /* NEW: FEE STATUS STYLES */
+  feeCard: { backgroundColor: '#fff', borderRadius: 16, borderWidth: 1, borderColor: '#e2e8f0', padding: 16, marginBottom: 24 },
+  feeHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  feeLabel: { fontSize: 12, fontWeight: 'bold', color: '#64748b' },
+  feeTotal: { fontSize: 18, fontWeight: '800', color: '#dc2626' },
+  feeDivider: { height: 1, backgroundColor: '#f1f5f9', marginBottom: 12 },
+  feeRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  feeTitle: { fontSize: 14, fontWeight: '600', color: '#334155' },
+  feeDate: { fontSize: 11, color: '#94a3b8' },
+  feeAmount: { fontSize: 14, fontWeight: 'bold', color: '#dc2626' },
+  warningBox: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#fffbeb', padding: 10, borderRadius: 8, marginTop: 4 },
+  warningText: { fontSize: 11, color: '#b45309', fontWeight: '500', flex: 1 },
+  
+  feeCleanCard: { flexDirection: 'row', alignItems: 'center', gap: 16, backgroundColor: '#f0fdf4', padding: 16, borderRadius: 16, borderWidth: 1, borderColor: '#dcfce7', marginBottom: 24 },
+  feeCleanTitle: { fontSize: 14, fontWeight: 'bold', color: '#15803d' },
+  feeCleanSub: { fontSize: 12, color: '#166534' },
 
   /* Sibling Switcher */
   siblingCard: { backgroundColor: '#fff', borderRadius: 16, borderWidth: 1, borderColor: '#e2e8f0', marginBottom: 24, overflow: 'hidden' },
@@ -388,9 +413,4 @@ const styles = StyleSheet.create({
   signOutBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#fef2f2', borderWidth: 1, borderColor: '#fecaca', paddingVertical: 14, borderRadius: 12, marginBottom: 8 },
   signOutText: { color: '#ef4444', fontWeight: 'bold', fontSize: 14 },
   versionText: { textAlign: 'center', fontSize: 10, color: '#94a3b8' },
-
-  /* Bottom Nav */
-  bottomNav: { flexDirection: 'row', backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#e2e8f0', paddingVertical: 10, paddingBottom: Platform.OS === 'ios' ? 25 : 10, justifyContent: 'space-around', alignItems: 'center', elevation: 10 },
-  navItem: { alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20 },
-  navLabel: { fontSize: 10, fontWeight: '600', color: '#94a3b8', marginTop: 4 },
 });

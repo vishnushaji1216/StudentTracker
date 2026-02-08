@@ -17,6 +17,8 @@ import StudentDetailScreen from './src/screens/Admin/StudentDetailScreen';
 import AdminSettingScreen from './src/screens/Admin/AdminSettingScreen';
 import PromotionToolScreen from './src/screens/Admin/PromotionToolScreen';
 import AdminBroadcastScreen from './src/screens/Admin/AdminBroadcastScreen';
+import AdminFeeManager from './src/screens/Admin/AdminFeeManager';
+import AdminFeeCollection from './src/screens/Admin/AdminFeeCollection';
 
 // Teacher Screens
 import TeacherDashScreen from './src/screens/Teacher/TeacherDashScreen';
@@ -52,6 +54,7 @@ import StudentQuizCenterScreen from './src/screens/Student/Quiz/StudentQuizCente
 import QuizInstructionScreen from './src/screens/Student/Quiz/QuizInstructionScreen'
 import QuizPlayerScreen from './src/screens/Student/Quiz/QuizPlayerScreen'
 import StudentQuizResultScreen from './src/screens/Student/Quiz/StudentQuizResultScreen';
+import LockScreen from './src/screens/Student/LockScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -114,6 +117,7 @@ export default function App() {
         <Stack.Screen name="QuizInstruction" component={QuizInstructionScreen} />
         <Stack.Screen name="QuizPlayer" component={QuizPlayerScreen} />
         <Stack.Screen name="StudentQuizResult" component={StudentQuizResultScreen} />
+        {/* <Stack.Screen name="LockScreen" getComponent={LockScreen} /> */}
 
         {/* Teacher */}
         <Stack.Screen name="TeacherDash" component={TeacherDashScreen} />
@@ -148,6 +152,8 @@ export default function App() {
         <Stack.Screen name="AdminSetting" component={AdminSettingScreen} />
         <Stack.Screen name="PromotionTool" component={PromotionToolScreen} />
         <Stack.Screen name="Broadcast" component={AdminBroadcastScreen} />
+        <Stack.Screen name="FeeManager" component={AdminFeeManager} />
+        <Stack.Screen name="AdminFeeCollection" component={AdminFeeCollection} />
 
       </Stack.Navigator>
     </NavigationContainer>

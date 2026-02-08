@@ -514,3 +514,154 @@ export const updateTeacherProfile = async (req, res) => {
     res.status(500).json({ message: "Update failed", error: error.message });
   }
 };
+
+export const getFeeDefaulters = async (req, res) => {
+  try {
+    const { search, className } = req.query;
+    let query = {};
+
+    // 1. Search Logic (Name or GR Number)
+    if (search) {
+      query.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { grNumber: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    // 2. Class Filter
+    if (className && className !== 'All') {
+      query.className = className;
+    }
+
+    // 3. Fetch Students & Populate Unpaid Fees
+    const students = await Student.find(query)
+      .select('name className rollNo grNumber profilePic fees')
+      .populate({
+        path: 'fees',
+        match: { status: { $ne: 'Paid' } }, // Only get unpaid fees
+        select: 'remainingAmount dueDate'
+      })
+      .lean(); // Convert to plain JS objects for performance
+
+    // 4. Process Data (Calculate Totals)
+    const processedList = students
+      .map(student => {
+        const totalDue = student.fees.reduce((sum, f) => sum + f.remainingAmount, 0);
+        
+        // Find the earliest due date (most urgent)
+        const oldestDueDate = student.fees.length > 0 
+          ? student.fees.sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate))[0].dueDate 
+          : null;
+
+        return {
+          _id: student._id,
+          name: student.name,
+          className: student.className,
+          grNumber: student.grNumber,
+          profilePic: student.profilePic,
+          initials: student.name.substring(0, 2).toUpperCase(),
+          totalDue,
+          oldestDueDate
+        };
+      })
+      .filter(s => s.totalDue > 0); // Only show students who owe money
+
+    // Sort by highest debt first
+    processedList.sort((a, b) => b.totalDue - a.totalDue);
+
+    res.json(processedList);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Error fetching defaulters" });
+  }
+};
+
+export const getStudentFeeDetails = async (req, res) => {
+  try {
+    const { studentId } = req.params;
+
+    // 1. Fetch Student Info (to get mobile and lock status)
+    const studentDoc = await Student.findById(studentId);
+
+    // --- DEBUG LOGS ---
+    console.log("--- DEBUG: Fetching Student Details ---");
+    console.log("Student ID:", studentId);
+    if (studentDoc) {
+        console.log("Student Found:", studentDoc.name);
+        console.log("Mobile Number in DB:", studentDoc.mobile); // <--- CHECK THIS IN TERMINAL
+        console.log("Lock Status in DB:", studentDoc.isLocked);
+    } else {
+        console.log("!!! ERROR: Student not found in Database !!!");
+    }
+    // ------------------
+
+    if (!studentDoc) return res.status(404).json({ message: "Student not found" });
+
+    // 2. Fetch all fees for this student
+    const studentFees = await Fee.find({ student: studentId }).sort({ dueDate: 1 });
+
+    // 3. Extract transactions history
+    let history = [];
+    studentFees.forEach(fee => {
+      fee.transactions.forEach(txn => {
+        history.push({
+          feeTitle: fee.title,
+          amount: txn.amount,
+          date: txn.date,
+          mode: txn.mode,
+          note: txn.note
+        });
+      });
+    });
+
+    history.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    // 4. Send Corrected Response
+    res.json({
+      fees: studentFees.filter(f => f.status !== 'Paid'),
+      history: history.slice(0, 10),
+      isLocked: studentDoc.isLocked || false, // Use the Student document, not the Fees array
+      contact: studentDoc.mobile || ""        // Use the Student document, not the Fees array
+    });
+
+  } catch (error) {
+    console.error("DEBUG ERROR:", error);
+    res.status(500).json({ message: "Error fetching fee details" });
+  }
+};
+
+export const collectFeePayment = async (req, res) => {
+  console.log("!!! CONTROLLER REACHED !!!"); // If you don't see this, the problem is in your routes file.
+  
+  try {
+    console.log("DATA RECEIVED:", JSON.stringify(req.body));
+    
+    const { feeId, amount, mode, remark } = req.body;
+    
+    if (!feeId) {
+       console.log("FAILED: No feeId");
+       return res.status(400).json({ message: "No feeId sent" });
+    }
+
+    const fee = await Fee.findById(feeId);
+    if (!fee) {
+       console.log("FAILED: Fee not found in DB");
+       return res.status(404).json({ message: "Fee not found" });
+    }
+
+    fee.paidAmount += Number(amount);
+    fee.transactions.push({
+      amount: Number(amount),
+      mode: mode,
+      note: remark
+    });
+
+    await fee.save();
+    console.log("SUCCESS: Saved to DB");
+    res.status(200).json({ message: "Success" });
+
+  } catch (error) {
+    console.error("CATCH ERROR:", error);
+    res.status(500).json({ message: error.message });
+  }
+};

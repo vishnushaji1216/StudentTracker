@@ -10,7 +10,10 @@ import {
   getStudentDetail,
   updateStudentProfile,
   getTeacherDetail, 
-  updateTeacherProfile
+  updateTeacherProfile,
+  getFeeDefaulters,
+  getStudentFeeDetails,
+  collectFeePayment
 } from "../controllers/admin.controller.js";
 
 import {
@@ -60,10 +63,13 @@ router.get('/broadcast-history', auth, adminCheck, getBroadcastHistory);
 router.delete('/broadcast/:id', auth, adminCheck, deleteNotice);
 
 //FEE
-router.post('/fees/assign', assignFee);          
-router.post('/fees/pay', recordPayment);         
-router.post('/fees/lock', toggleStudentLock);    
-router.get('/fees/student/:studentId', getStudentFees);
-router.get('/fees/dashboard', getFeeDashboardStats);
+router.post('/fees/assign', auth, adminCheck, assignFee);          
+router.post('/fees/pay', auth, adminCheck, recordPayment);         
+router.post('/fees/lock', auth, adminCheck, toggleStudentLock);    
+router.get('/fees/student/:studentId', auth, adminCheck, getStudentFees);
+router.get('/fees/dashboard', auth, adminCheck, getFeeDashboardStats);
+router.get('/fee-defaulters', auth, adminCheck, getFeeDefaulters);
+router.get('/student/:studentId/fees', auth, adminCheck, getStudentFeeDetails)
+router.post('/fees/collect', auth, adminCheck, collectFeePayment);
 
 export default router;

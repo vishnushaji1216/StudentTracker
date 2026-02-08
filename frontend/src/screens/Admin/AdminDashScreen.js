@@ -106,6 +106,7 @@ export default function AdminDashScreen({ navigation }) {
               <SidebarItem icon="bullhorn" label="Broadcast" onPress={() => {toggleSidebar();navigation.navigate('Broadcast');}}/>
               <SidebarItem icon="graduation-cap" label="Promotion Tool" onPress={() => {toggleSidebar();navigation.navigate('PromotionTool');}}/>
               <SidebarItem icon="shield-alt" label="Security" onPress={() => {toggleSidebar(); navigation.navigate('AdminSetting');}}/>
+              <SidebarItem icon="banknote" label="Fee Manager" onPress={() => {toggleSidebar(); navigation.navigate('FeeManager');}} />
             </View>
             {/* -------------------------------------- */}
 

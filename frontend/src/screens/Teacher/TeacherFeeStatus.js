@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, 
-  Linking, ActivityIndicator, StatusBar, Alert
+  Linking, ActivityIndicator, StatusBar, Alert,
+  RefreshControl // 1. Import RefreshControl
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import FontAwesome5 from "react-native-vector-icons/FontAwesome5";
@@ -11,21 +12,32 @@ import api from "../../services/api";
 export default function TeacherFeeStatus({ navigation }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false); // 2. Add refreshing state
   const [data, setData] = useState({ className: "", defaulters: [] });
 
   useEffect(() => {
     fetchDefaulters();
   }, []);
 
+  // 3. Create a refresh handler
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    fetchDefaulters().then(() => setRefreshing(false));
+  }, []);
+
   const fetchDefaulters = async () => {
     try {
-      setLoading(true);
+      // Only show the big loader on initial mount, not during pull-to-refresh
+      if (!refreshing) setLoading(true); 
+      
       const response = await api.get('/teacher/my-class-defaulters');
       setData(response.data);
     } catch (error) {
+      console.error(error);
       Alert.alert("Error", "Failed to load fee status.");
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
@@ -36,7 +48,7 @@ export default function TeacherFeeStatus({ navigation }) {
   const handleWhatsApp = (student) => {
     const feeNames = student.pendingFees.map(f => `${f.title}: ₹${f.remainingAmount}`).join(", ");
     const message = `Dear Parent, pending fees for ${student.name} are as follows: ${feeNames}. Total due: ₹${student.totalPending}. Please clear this to ensure uninterrupted app access.`;
-    Linking.openURL(`whatsapp://send?phone=91${student.mobile}&text=${message}`);
+    Linking.openURL(`whatsapp://send?phone=91${student.mobile}&text=${encodeURIComponent(message)}`);
   };
 
   const renderStudentCard = (student) => (
@@ -50,7 +62,7 @@ export default function TeacherFeeStatus({ navigation }) {
           </View>
           <View>
             <Text style={styles.name}>{student.name}</Text>
-            <Text style={styles.roll}>Roll: #{student.rollNo} • GR: {student.id.substring(0, 6).toUpperCase()}</Text>
+            <Text style={styles.roll}>Roll: #{student.rollNo}</Text>
           </View>
         </View>
         <View style={[styles.statusBadge, student.isLocked ? styles.badgeLocked : styles.badgeActive]}>
@@ -58,7 +70,6 @@ export default function TeacherFeeStatus({ navigation }) {
         </View>
       </View>
 
-      {/* Individual Fees Breakdown */}
       <View style={styles.feeContainer}>
         {student.pendingFees.map((fee, idx) => (
           <View key={idx} style={styles.feeItem}>
@@ -102,10 +113,21 @@ export default function TeacherFeeStatus({ navigation }) {
           </View>
         </View>
 
-        {loading ? (
+        {loading && !refreshing ? (
           <ActivityIndicator size="large" color="#4f46e5" style={{ marginTop: 50 }} />
         ) : (
-          <ScrollView contentContainerStyle={styles.list}>
+          <ScrollView 
+            contentContainerStyle={styles.list}
+            // 4. Attach RefreshControl to ScrollView
+            refreshControl={
+              <RefreshControl 
+                refreshing={refreshing} 
+                onRefresh={onRefresh} 
+                colors={["#4f46e5"]} // Android
+                tintColor="#4f46e5" // iOS
+              />
+            }
+          >
             {data.defaulters.length > 0 ? (
               data.defaulters.map(renderStudentCard)
             ) : (
@@ -128,7 +150,7 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#1e293b' },
   headerSub: { fontSize: 10, color: '#64748b', fontWeight: 'bold', marginTop: 2 },
   list: { padding: 15 },
-  card: { backgroundColor: '#fff', borderRadius: 16, padding: 16, marginBottom: 15, borderWidth: 1, borderColor: '#e2e8f0', elevation: 2 },
+  card: { backgroundColor: '#fff', borderRadius: 16, padding: 16, marginBottom: 15, borderWidth: 1, borderColor: '#e2e8f0' },
   cardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 15 },
   studentInfo: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   avatar: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },

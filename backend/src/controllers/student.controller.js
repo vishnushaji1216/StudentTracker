@@ -10,112 +10,141 @@ import { uploadFileToSupabase } from "../services/supabase.js";
 // --- DASHBOARD & PROFILE (Kept largely the same) ---
 
 export const getStudentDashboard = async (req, res) => {
-    try {
-      const studentId = req.user.id;
-      const now = new Date();
-      
-      const student = await Student.findById(studentId);
-      if (!student) return res.status(404).json({ message: "Student not found" });
-  
-      const siblingCount = await Student.countDocuments({ 
-          mobile: student.mobile, 
-          _id: { $ne: studentId } 
+  try {
+    const studentId = req.user.id;
+    const now = new Date();
+    
+    // 1. UPDATE: Fetch Student with Fee Data & Lock Status
+    const student = await Student.findById(studentId)
+      .populate({
+          path: 'fees',
+          match: { status: { $ne: 'Paid' } }, // Only fetch what they owe
+          select: 'title remainingAmount dueDate status'
       });
-  
-      const allAssignments = await Assignment.find({ 
+
+    if (!student) return res.status(404).json({ message: "Student not found" });
+
+    // 2. Siblings Logic
+    const siblingCount = await Student.countDocuments({ 
+        mobile: student.mobile, 
+        _id: { $ne: studentId } 
+    });
+
+    // 3. Assignments Logic
+    const allAssignments = await Assignment.find({ 
+      className: student.className,
+      status: { $in: ['Scheduled', 'Active'] } ,
+      dueDate: { $gte: now}
+    }).sort({ dueDate: 1 });
+
+    const mySubmissions = await Submission.find({ student: studentId });
+    const submittedAssignmentIds = mySubmissions.map(s => s.assignment?.toString());
+
+    const pendingTasks = allAssignments.filter(a => 
+      !submittedAssignmentIds.includes(a._id.toString())
+    );
+
+    const dailyMission = pendingTasks.length > 0 ? pendingTasks[0] : null;
+
+    // 4. Feedback Logic
+    const recentFeedback = await Submission.find({ 
+      student: studentId, 
+      status: 'Graded' 
+    })
+    .sort({ updatedAt: -1 })
+    .limit(5)
+    .populate('assignment', 'title subject');
+
+    // 5. RESPONSE
+    res.json({
+      student: {
+        name: student.name,
         className: student.className,
-        status: { $in: ['Scheduled', 'Active'] } ,
-        dueDate: { $gte: now}
-      }).sort({ dueDate: 1 });
-  
-      const mySubmissions = await Submission.find({ student: studentId });
-      const submittedAssignmentIds = mySubmissions.map(s => s.assignment?.toString());
-  
-      const pendingTasks = allAssignments.filter(a => 
-        !submittedAssignmentIds.includes(a._id.toString())
-      );
-  
-      const dailyMission = pendingTasks.length > 0 ? pendingTasks[0] : null;
-  
-      const recentFeedback = await Submission.find({ 
-        student: studentId, 
-        status: 'Graded' 
-      })
-      .sort({ updatedAt: -1 })
-      .limit(5)
-      .populate('assignment', 'title subject');
-  
-      res.json({
-        student: {
-          name: student.name,
-          className: student.className,
-          rollNo: student.rollNo,
-          initials: student.name.substring(0, 2).toUpperCase()
-        },
-        hasSiblings: siblingCount > 0,
-        dailyMission: dailyMission ? {
-          id: dailyMission._id,
-          type: dailyMission.type,
-          title: dailyMission.title,
-          subject: dailyMission.subject,
-          deadline: new Date(dailyMission.dueDate).toLocaleTimeString([], { hour: '2-digit', minute:'2-digit'}),
-        } : null,
-        pendingCount: pendingTasks.length,
-        pendingList: pendingTasks.slice(0, 3).map(t => ({
-          id: t._id,
-          title: t.title,
-          type: t.type,
-          endsIn: "Due " + new Date(t.dueDate).toLocaleDateString()
-        })),
-        feedback: recentFeedback
-      });
-  
-    } catch (error) {
-      console.error("Dashboard Error:", error);
-      res.status(500).json({ message: "Failed to load dashboard" });
-    }
+        rollNo: student.rollNo,
+        initials: student.name.substring(0, 2).toUpperCase(),
+        
+        // --- CRITICAL ADDITIONS FOR LOCK SCREEN ---
+        isFeeLocked: student.isFeeLocked, 
+        fees: student.fees 
+      },
+      hasSiblings: siblingCount > 0,
+      dailyMission: dailyMission ? {
+        id: dailyMission._id,
+        type: dailyMission.type,
+        title: dailyMission.title,
+        subject: dailyMission.subject,
+        deadline: new Date(dailyMission.dueDate).toLocaleTimeString([], { hour: '2-digit', minute:'2-digit'}),
+      } : null,
+      pendingCount: pendingTasks.length,
+      pendingList: pendingTasks.slice(0, 3).map(t => ({
+        id: t._id,
+        title: t.title,
+        type: t.type,
+        endsIn: "Due " + new Date(t.dueDate).toLocaleDateString()
+      })),
+      feedback: recentFeedback
+    });
+
+  } catch (error) {
+    console.error("Dashboard Error:", error);
+    res.status(500).json({ message: "Failed to load dashboard" });
+  }
 };
 
 export const getStudentProfile = async (req, res) => {
-    try {
-      const studentId = req.user.id;
-      const currentStudent = await Student.findById(studentId);
-  
-      const siblings = await Student.find({
-        mobile: currentStudent.mobile,
-        _id: { $ne: studentId }
-      }).select('name className rollNo profilePic');
-  
-      const teachers = await Teacher.find({
-        $or: [
-          { classTeachership: currentStudent.className }, 
-          { 'assignments.class': currentStudent.className } 
-        ]
-      }).select('name mobile classTeachership assignments');
-  
-      const myTeachers = teachers.map(t => ({
+  try {
+    const studentId = req.user.id;
+
+    // 1. Fetch Student & Populate Pending Fees
+    const currentStudent = await Student.findById(studentId)
+      .select('-password') // Exclude password for security
+      .populate({
+        path: 'fees',
+        match: { status: { $ne: 'Paid' } }, // Only fetch Unpaid/Partial/Overdue
+        select: 'title totalAmount remainingAmount dueDate status' 
+      });
+
+    if (!currentStudent) {
+        return res.status(404).json({ message: "Student not found" });
+    }
+
+    // 2. Fetch Siblings (Same logic)
+    const siblings = await Student.find({
+      mobile: currentStudent.mobile,
+      _id: { $ne: studentId }
+    }).select('name className rollNo profilePic');
+
+    // 3. Fetch Teachers (Same logic)
+    const teachers = await Teacher.find({
+      $or: [
+        { classTeachership: currentStudent.className }, 
+        { 'assignments.class': currentStudent.className } 
+      ]
+    }).select('name mobile classTeachership assignments');
+
+    // Map Teachers to a cleaner format
+    const myTeachers = teachers.map(t => {
+      const assignment = t.assignments.find(a => a.class === currentStudent.className);
+      return {
         id: t._id,
         name: t.name,
         role: t.classTeachership === currentStudent.className ? "Class Teacher" : "Subject Teacher",
-        subject: t.assignments.find(a => a.class === currentStudent.className)?.subject || "General",
+        subject: assignment ? assignment.subject : "General", // Fallback if CT
         mobile: t.mobile 
-      }));
-  
-      res.json({
-        profile: currentStudent,
-        siblings,
-        teachers: myTeachers
-      });
-  
-    } catch (error) {
-      console.error("Profile Error:", error);
-      res.status(500).json({ message: "Failed to load profile" });
-    }
-};
+      };
+    });
 
-// backend/src/controllers/student.controller.js
-// import Student from "../models/student.model.js";
-// import Submission from "../models/submission.model.js";
+    res.json({
+      profile: currentStudent,
+      siblings,
+      teachers: myTeachers
+    });
+
+  } catch (error) {
+    console.error("Profile Error:", error);
+    res.status(500).json({ message: "Failed to load profile" });
+  }
+};
 
 export const getStudentStats = async (req, res) => {
   try {

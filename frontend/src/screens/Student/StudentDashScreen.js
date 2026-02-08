@@ -18,7 +18,8 @@ import FontAwesome5 from "react-native-vector-icons/FontAwesome5";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect } from "@react-navigation/native";
 import api from "../../services/api";
-import StudentSidebar from "../../components/StudentSidebar"; // <--- Import Component
+import StudentSidebar from "../../components/StudentSidebar"; 
+import LockedScreen from "./LockScreen";
 
 const { width } = Dimensions.get('window');
 
@@ -27,10 +28,11 @@ export default function StudentDashScreen({ navigation }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   // --- STATE: Data ---
+  const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [dashboardData, setDashboardData] = useState({
-    student: { name: "", className: "", initials: "" },
+    student: { name: "", className: "", initials: "", isFeeLocked: false },
     hasSiblings: false,
     dailyMission: null,
     pendingList: [],
@@ -140,6 +142,17 @@ export default function StudentDashScreen({ navigation }) {
             <ActivityIndicator size="large" color="#4f46e5" />
         </View>
     );
+  }
+
+  // --- 🔒 THE IRON DOME LOGIC ---
+  // If user is locked, hijack the render and show LockedScreen
+  if (dashboardData.student.isFeeLocked) {
+      return (
+          <LockedScreen 
+              studentData={dashboardData.student} 
+              onLogout={handleLogout} 
+          />
+      );
   }
 
   const { student, hasSiblings, dailyMission, pendingList } = dashboardData;
@@ -450,4 +463,4 @@ const styles = StyleSheet.create({
   bottomNav: { flexDirection: 'row', backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#e2e8f0', paddingVertical: 10, paddingBottom: Platform.OS === 'ios' ? 25 : 10, justifyContent: 'space-around', alignItems: 'center', elevation: 10 },
   navItem: { alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20 },
   navLabel: { fontSize: 10, fontWeight: '600', color: '#94a3b8', marginTop: 4 },
-});
+}); 
