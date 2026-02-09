@@ -289,19 +289,76 @@ export const submitGradebook = async (req, res) => {
   }
 };
 
-// --- 6. DASHBOARD STATS ---
 export const getTeacherDashboardStats = async (req, res) => {
   try {
     const teacherId = req.user.id;
-    console.log("\n🔍 [DASHBOARD] Generating Resilient Stats...");
+    console.log(`\n🔍 [DASHBOARD] Loading Stats for Teacher: ${teacherId}`);
 
-    // 1. Identify Class
+    // 1. Identify Teacher & Class Logic
     const teacher = await Teacher.findById(teacherId);
-    const className = teacher?.classTeachership || "N/A";
+    if (!teacher) return res.status(404).json({ message: "Teacher not found" });
+
+    const className = teacher.classTeachership || "N/A";
+
+    // 2. FIND RELEVANT ASSIGNMENTS & STUDENTS
+    const myAssignments = await Assignment.find({ teacher: teacherId }).select('_id');
+    const myAssignmentIds = myAssignments.map(a => a._id);
+
+    let myClassStudentIds = [];
+    if (teacher.classTeachership) {
+        const students = await Student.find({ className: teacher.classTeachership }).select('_id');
+        myClassStudentIds = students.map(s => s._id);
+    }
+
+    const visibilityFilter = {
+        $or: [
+            { assignment: { $in: myAssignmentIds } },
+            { student: { $in: myClassStudentIds } }
+        ]
+    };
 
     // --------------------------------------------------
-    // 1. GLOBAL AVERAGE (UNCHANGED)
+    // 3. PENDING TASKS
     // --------------------------------------------------
+    
+    // A. AUDIO: Count submitted audio waiting for grading
+    const pendingAudio = await Submission.countDocuments({ 
+        ...visibilityFilter,
+        status: { $in: ['submitted', 'pending', 'Submitted', 'Pending'] },
+        type: 'audio' 
+    });
+
+    // B. HANDWRITING: Count students who DON'T have a recent review
+    let pendingHandwriting = 0;
+    
+    if (teacher.classTeachership && myClassStudentIds.length > 0) {
+        // Get start of current week (7 days ago)
+        const oneWeekAgo = new Date();
+        oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+
+        // Find students who HAVE been reviewed this week
+        const reviewedThisWeek = await Submission.find({
+            type: { $regex: /^handwriting$/i },
+            student: { $in: myClassStudentIds },
+            submittedAt: { $gte: oneWeekAgo },
+            status: { $in: ['graded', 'Graded'] }
+        }).distinct('student');
+
+        // Pending = Total students - Reviewed students
+        pendingHandwriting = myClassStudentIds.length - reviewedThisWeek.length;
+
+        console.log(`📊 Handwriting Stats:`);
+        console.log(`   Total students: ${myClassStudentIds.length}`);
+        console.log(`   Reviewed this week: ${reviewedThisWeek.length}`);
+        console.log(`   Pending: ${pendingHandwriting}`);
+    }
+
+    console.log(`✅ Pending Found - Audio: ${pendingAudio}, Handwriting: ${pendingHandwriting}`);
+
+    // --------------------------------------------------
+    // 4. CLASS PERFORMANCE (GRAPH & AVERAGE)
+    // --------------------------------------------------
+    
     const globalStats = await Submission.aggregate([
       { 
         $match: { 
@@ -318,58 +375,39 @@ export const getTeacherDashboardStats = async (req, res) => {
     ]);
     const globalAverage = globalStats.length > 0 ? Math.round(globalStats[0].avg) : 0;
 
-    // --------------------------------------------------
-    // 2. RESILIENT GRAPH DATA (THE FIX)
-    // --------------------------------------------------
-    // Instead of finding Assignments, we group Submissions by their 'assignment' ID.
-    // This reconstructs the "Exam" even if the Assignment document was deleted.
     const graphStats = await Submission.aggregate([
-        // A. Filter: Graded work for this teacher
         { 
             $match: { 
                 teacher: new mongoose.Types.ObjectId(teacherId),
                 status: { $in: ['graded', 'Graded'] } 
             } 
         },
-        // B. Group by Assignment ID (Re-grouping the exam papers)
         { 
             $group: {
-                _id: "$assignment", // Group by the exam ID
+                _id: "$assignment", 
                 avgScore: { $avg: { $multiply: [{ $divide: ["$obtainedMarks", "$totalMarks"] }, 100] } },
-                subject: { $first: "$subject" }, // Grab the subject (e.g. "Math")
-                date: { $max: "$submittedAt" }   // Use the latest submission time as date
+                subject: { $first: "$subject" }, 
+                date: { $max: "$submittedAt" }  
             }
         },
-        // C. Sort by Date (Oldest to Newest)
         { $sort: { date: 1 } } 
     ]);
 
-    // Take the last 3 events
     const recentHistory = graphStats.slice(-3).map(stat => ({
         id: stat._id,
-        // If Title is lost (deleted assignment), use Subject + Date
         label: stat.subject || "Exam", 
         score: Math.round(stat.avgScore),
         date: stat.date
     }));
 
-    console.log("📊 Resilient Graph Data:", recentHistory);
-
     // --------------------------------------------------
-    // 3. PENDING TASKS
+    // 5. SEND RESPONSE
     // --------------------------------------------------
-    const pendingQuery = {
-      teacher: teacherId,
-      status: { $in: ['submitted', 'pending', 'Submitted', 'Pending'] }
-    };
-    const pendingAudio = await Submission.countDocuments({ ...pendingQuery, type: 'audio' });
-    const pendingHandwriting = await Submission.countDocuments({ ...pendingQuery, type: 'handwriting' });
-
     res.json({
       className,
       classPerformance: {
         currentAvg: globalAverage,
-        trend: 0, 
+        trend: 0,
         history: recentHistory
       },
       pendingTasks: {

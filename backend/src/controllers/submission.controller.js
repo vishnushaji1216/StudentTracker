@@ -14,28 +14,60 @@ export const logHandwritingReview = async (req, res) => {
 
     // --- COMPRESSION STEP ---
     const compressedBuffer = await sharp(req.file.buffer)
-      .resize({ width: 1024, withoutEnlargement: true }) // Resize to max width 1024px
-      .jpeg({ quality: 70 }) // Compress quality to 70%
+      .resize({ width: 1024, withoutEnlargement: true })
+      .jpeg({ quality: 70 })
       .toBuffer();
     // ------------------------
 
     const fileName = `hw_${studentId}_${Date.now()}.jpg`;
     const publicUrl = await uploadFileToSupabase(compressedBuffer, fileName, 'image/jpeg', 'handwriting');
 
-    const newSubmission = new Submission({
+    // CHECK: Does this student already have a handwriting submission?
+    const existingSubmission = await Submission.findOne({
       student: studentId,
-      teacher: teacherId,
-      type: 'Handwriting',
-      status: 'Graded',
-      fileUrl: publicUrl,
-      obtainedMarks: Number(rating),
-      feedback: feedback || "",
-      tags: tags ? JSON.parse(tags) : [],
-      submittedAt: new Date()
-    });
+      type: { $regex: /^handwriting$/i }
+    }).sort({ submittedAt: -1 }); // Get the most recent one
 
-    await newSubmission.save();
-    res.status(201).json({ message: "Logged successfully", data: newSubmission });
+    if (existingSubmission) {
+      // UPDATE existing submission
+      existingSubmission.teacher = teacherId;
+      existingSubmission.status = 'Graded';
+      existingSubmission.fileUrl = publicUrl;
+      existingSubmission.obtainedMarks = Number(rating);
+      existingSubmission.feedback = feedback || "";
+      existingSubmission.tags = tags ? JSON.parse(tags) : [];
+      existingSubmission.submittedAt = new Date(); // Reset the 7-day timer
+
+      await existingSubmission.save();
+      
+      res.status(200).json({ 
+        message: "Updated successfully", 
+        data: existingSubmission 
+      });
+
+    } else {
+      // CREATE new submission (first time review for this student)
+      const newSubmission = new Submission({
+        student: studentId,
+        teacher: teacherId,
+        type: 'handwriting',
+        status: 'graded',
+        subject: 'General', // You can make this dynamic
+        totalMarks: 5,
+        fileUrl: publicUrl,
+        obtainedMarks: Number(rating),
+        feedback: feedback || "",
+        tags: tags ? JSON.parse(tags) : [],
+        submittedAt: new Date()
+      });
+
+      await newSubmission.save();
+      
+      res.status(201).json({ 
+        message: "Logged successfully", 
+        data: newSubmission 
+      });
+    }
 
   } catch (error) {
     console.error("Log Error:", error);
@@ -56,7 +88,6 @@ export const getHandwritingQueue = async (req, res) => {
       }
   
       // B. Determine Target Class
-      // USE THE CORRECT FIELD FROM YOUR SCHEMA: 'classTeachership'
       const targetClass = teacher.classTeachership;
   
       console.log("✅ Teacher Found:", teacher.name);
@@ -74,19 +105,41 @@ export const getHandwritingQueue = async (req, res) => {
   
       console.log(`📚 Found ${students.length} students in ${targetClass}`);
   
-      // D. Fetch submissions for this week
-      const startOfWeek = new Date();
-      startOfWeek.setDate(startOfWeek.getDate() - 7);
-  
-      const recentSubmissions = await Submission.find({
-        type: 'Handwriting',
-        submittedAt: { $gte: startOfWeek },
+      // D. Fetch handwriting submissions for these students
+      const submissions = await Submission.find({
+        type: { $regex: /^handwriting$/i },
         student: { $in: students.map(s => s._id) }
+      }).sort({ submittedAt: -1 });
+
+      // E. Create a map for quick lookup (one submission per student - the latest)
+      const submissionMap = {};
+      submissions.forEach(sub => {
+        const studentId = sub.student.toString();
+        if (!submissionMap[studentId]) {
+          submissionMap[studentId] = sub;
+        }
       });
   
-      // E. Merge Data
+      // F. Merge Data
       const queue = students.map(student => {
-        const sub = recentSubmissions.find(s => s.student.toString() === student._id.toString());
+        const sub = submissionMap[student._id.toString()];
+        
+        // Determine status based on submission
+        let status = 'pending';
+        let color = '#64748b';
+        let bg = '#f1f5f9';
+        
+        if (sub) {
+          if (sub.status === 'Graded' || sub.status === 'graded') {
+            status = 'logged';
+            color = '#16a34a';
+            bg = '#f0fdf4';
+          } else if (sub.status === 'Pending' || sub.status === 'pending') {
+            status = 'pending';
+            color = '#ef4444';
+            bg = '#fef2f2';
+          }
+        }
         
         return {
           id: student._id,
@@ -97,9 +150,9 @@ export const getHandwritingQueue = async (req, res) => {
           roll: student.rollNo || 'N/A',
           className: student.className,
           initials: student.name.substring(0, 2).toUpperCase(),
-          color: sub ? '#16a34a' : '#64748b',
-          bg: sub ? '#f0fdf4' : '#f1f5f9',
-          status: sub ? 'logged' : 'pending',
+          color: color,
+          bg: bg,
+          status: status,
           rating: sub ? sub.obtainedMarks : 0,
         };
       });
@@ -114,33 +167,41 @@ export const getHandwritingQueue = async (req, res) => {
 
 export const deleteHandwritingReview = async (req, res) => {
   try {
-    // 1. EXTRACT ID (Ensure variable name matches Route)
     const { submissionId } = req.params;
 
-    // Safety Check: Did we get an ID?
     if (!submissionId) {
         console.error("❌ Delete Error: submissionId is undefined in req.params");
         return res.status(400).json({ message: "Missing submission ID" });
     }
 
-    console.log(`🗑️ Deleting Submission: ${submissionId}`);
+    console.log(`🗑️ Deleting/Resetting Submission: ${submissionId}`);
 
-    // 2. Find the submission first
     const submission = await Submission.findById(submissionId);
     
     if (!submission) {
         return res.status(404).json({ message: "Submission not found" });
     }
 
-    // 3. Delete Image from Supabase (if exists)
+    // OPTION 1: Reset to pending (keep the record, but mark as needs review)
+    // This is better for tracking history
+    submission.status = 'pending';
+    submission.obtainedMarks = 0;
+    submission.feedback = '';
+    submission.tags = [];
+    // Keep the fileUrl so you can still see old photo if needed
+    
+    await submission.save();
+
+    res.json({ message: "Submission reset to pending" });
+
+    // OPTION 2: Complete deletion (uncomment if you prefer this)
+    /*
     if (submission.fileUrl) {
         await deleteFileFromSupabase(submission.fileUrl);
     }
-
-    // 4. Delete Record from MongoDB
     await Submission.findByIdAndDelete(submissionId);
-
     res.json({ message: "Submission deleted successfully" });
+    */
 
   } catch (error) {
     console.error("Delete Error:", error);

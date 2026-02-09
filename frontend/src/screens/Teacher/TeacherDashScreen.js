@@ -16,7 +16,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import FontAwesome5 from "react-native-vector-icons/FontAwesome5";
 import Svg, { Path, Circle, Line, Defs, LinearGradient, Stop, Text as SvgText } from "react-native-svg";
 import TeacherSidebar from "../../components/TeacherSidebar";
-import api from "../../services/api"; // <--- Import API
+import api from "../../services/api";
 
 export default function TeacherDashScreen({ navigation }) {
   // --- STATE ---
@@ -31,7 +31,7 @@ export default function TeacherDashScreen({ navigation }) {
     classPerformance: {
       currentAvg: 0,
       trend: 0,
-      history: [] // [{ label: 'Quiz 1', score: 0 }, ...]
+      history: []
     },
     pendingTasks: {
       audio: 0,
@@ -43,7 +43,6 @@ export default function TeacherDashScreen({ navigation }) {
   // --- API CALL ---
   const fetchStats = useCallback(async () => {
     try {
-      // Connects to the backend controller we wrote: getTeacherDashboardStats
       const response = await api.get('/teacher/dashboard-stats');
       setStats(response.data);
     } catch (error) {
@@ -78,15 +77,12 @@ export default function TeacherDashScreen({ navigation }) {
   }, [isSidebarOpen]);
 
   // --- GRAPH ENGINE ---
-  // Calculates SVG path based on exactly 3 data points
   const generateGraphPath = (history) => {
     if (!history || history.length < 3) return { line: "", area: "", points: [] };
 
-    // Map scores (0-100) to Y coordinates (100-0) because SVG 0 is top
-    // Added padding to x and y calculations to prevent cutoff
     const getPoint = (index, score) => {
-      const x = index * 130 + 20; // 20, 150, 280 (Added padding)
-      const y = 90 - (score * 0.8); // Scale score to fit in 10-90 range to avoid top/bottom cutoff
+      const x = index * 130 + 20;
+      const y = 90 - (score * 0.8);
       return { x, y };
     };
 
@@ -94,8 +90,6 @@ export default function TeacherDashScreen({ navigation }) {
     const p2 = getPoint(1, history[1].score);
     const p3 = getPoint(2, history[2].score);
 
-    // Create a smooth Bezier curve passing through these points
-    // Simple S-Curve logic for 3 points
     const linePath = `
       M ${p1.x},${p1.y} 
       C ${p1.x + 65},${p1.y} ${p2.x - 65},${p2.y} ${p2.x},${p2.y}
@@ -109,15 +103,11 @@ export default function TeacherDashScreen({ navigation }) {
 
   const { line, area, points } = generateGraphPath(stats.classPerformance.history);
 
-  // --- DONUT CHART CALC ---
-  // Using pending Audio count vs a dummy "Goal" of 30 for visualization
-  const pendingAudio = stats.pendingTasks.audio || 0;
-  const donutSize = 100;
-  const strokeWidth = 10;
+  // --- DONUT CHART CONSTANTS ---
+  const donutSize = 80; // Reduced from 100
+  const strokeWidth = 8; // Reduced from 10
   const radius = (donutSize - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
-  const maxGoal = 30; // Just for visual circle filling
-  const progress = Math.min(pendingAudio / maxGoal, 1); 
 
   // --- RENDER ---
   return (
@@ -161,7 +151,6 @@ export default function TeacherDashScreen({ navigation }) {
                     <View style={styles.heroStatsRow}>
                       <Text style={styles.heroScore}>{stats.classPerformance.currentAvg}%</Text>
                       
-                      {/* Dynamic Trend Indicator */}
                       <View style={[styles.heroTrend, stats.classPerformance.trend < 0 && { backgroundColor: '#fef2f2' }]}>
                         <FontAwesome5 
                           name={stats.classPerformance.trend >= 0 ? "arrow-up" : "arrow-down"} 
@@ -174,7 +163,6 @@ export default function TeacherDashScreen({ navigation }) {
                       </View>
                     </View>
                   </View>
-                  {/* Removed the three-dot button here */}
                 </View>
 
                 {/* Dynamic Chart Area */}
@@ -188,16 +176,13 @@ export default function TeacherDashScreen({ navigation }) {
                         </LinearGradient>
                       </Defs>
                       
-                      {/* Grid Lines */}
                       <Line x1="20" y1="10" x2="280" y2="10" stroke="#f8fafc" strokeWidth="1" />
                       <Line x1="20" y1="50" x2="280" y2="50" stroke="#f8fafc" strokeWidth="1" />
                       <Line x1="20" y1="90" x2="280" y2="90" stroke="#f8fafc" strokeWidth="1" />
 
-                      {/* The Generated Paths */}
                       <Path d={area} fill="url(#grad)" />
                       <Path d={line} fill="none" stroke="#4f46e5" strokeWidth="3" />
                       
-                      {/* Dynamic Data Points */}
                       {points.map((p, i) => (
                         <React.Fragment key={i}>
                           <Circle cx={p.x} cy={p.y} r={i===2 ? 4 : 3} fill={i===2 ? "white" : "#4f46e5"} stroke={i===2 ? "#4f46e5" : "none"} strokeWidth={i===2 ? 2 : 0}/>
@@ -221,7 +206,7 @@ export default function TeacherDashScreen({ navigation }) {
                   )}
                 </View>
 
-                {/* X-Axis Labels - Modified to wrap text */}
+                {/* X-Axis Labels */}
                 <View style={styles.chartLabels}>
                   {stats.classPerformance.history.map((item, index) => (
                     <View key={index} style={{ width: 80, alignItems: (index === 0 ? 'flex-start' : index === 2 ? 'flex-end' : 'center') }}>
@@ -233,45 +218,70 @@ export default function TeacherDashScreen({ navigation }) {
                         </Text>
                     </View>
                   ))}
-                  {/* Fallback if empty */}
                   {stats.classPerformance.history.length === 0 && <Text style={styles.chartLabel}>No Data</Text>}
                 </View>
               </View>
 
-              {/* 2. SECONDARY: AUDIO TARGET */}
-              <View style={styles.secondaryCard}>
-                <View style={{ flex: 1, justifyContent: 'center', gap: 4 }}>
+              {/* 2. PENDING REVIEWS - TWO DONUTS IN ONE CARD */}
+              <View style={styles.pendingCard}>
+                <View style={styles.pendingHeader}>
                   <Text style={styles.cardSubtitle}>PENDING REVIEWS</Text>
                   <View style={styles.timeRow}>
                     <FontAwesome5 name="clock" size={10} color="#818cf8" />
                     <Text style={styles.timeText}>Updated Just Now</Text>
                   </View>
-                  
-                  <View style={styles.miniStatsRow}>
-                    <View>
-                      <Text style={styles.miniLabel}>AUDIO</Text>
-                      <Text style={styles.miniValueRed}>{stats.pendingTasks.audio}</Text>
-                    </View>
-                    <View style={{ width: 1, height: 20, backgroundColor: '#e2e8f0' }} />
-                    <View>
-                      <Text style={styles.miniLabel}>WRITING</Text>
-                      <Text style={styles.miniValue}>{stats.pendingTasks.handwriting}</Text>
-                    </View>
-                  </View>
                 </View>
 
-                {/* Donut Chart (Audio Focus) */}
-                <View style={{ width: donutSize, height: donutSize, justifyContent: 'center', alignItems: 'center' }}>
-                  <Svg width={donutSize} height={donutSize}>
-                    <Circle cx={donutSize / 2} cy={donutSize / 2} r={radius} stroke="#E0E7FF" strokeWidth={strokeWidth} fill="transparent" />
-                    <Circle
-                      cx={donutSize / 2} cy={donutSize / 2} r={radius} stroke="#4F46E5" strokeWidth={strokeWidth}
-                      strokeDasharray={[circumference]} strokeDashoffset={circumference * (1 - progress)} strokeLinecap="round" fill="transparent" rotation="-90" origin={`${donutSize / 2}, ${donutSize / 2}`}
-                    />
-                  </Svg>
-                  <View style={styles.donutInner}>
-                    <Text style={styles.donutText}>{pendingAudio}</Text>
-                    <Text style={styles.donutSub}>Pending</Text>
+                <View style={styles.donutRow}>
+                  {/* Audio Donut */}
+                  <View style={styles.donutSection}>
+                    <View style={{ width: donutSize, height: donutSize, justifyContent: 'center', alignItems: 'center' }}>
+                      <Svg width={donutSize} height={donutSize}>
+                        <Circle cx={donutSize / 2} cy={donutSize / 2} r={radius} stroke="#FEE2E2" strokeWidth={strokeWidth} fill="transparent" />
+                        <Circle
+                          cx={donutSize / 2} cy={donutSize / 2} r={radius} stroke="#EF4444" strokeWidth={strokeWidth}
+                          strokeDasharray={[circumference]} 
+                          strokeDashoffset={circumference * (1 - (stats.pendingTasks.audio / Math.max(stats.pendingTasks.total, 1)))} 
+                          strokeLinecap="round" fill="transparent" rotation="-90" origin={`${donutSize / 2}, ${donutSize / 2}`}
+                        />
+                      </Svg>
+                      <View style={styles.donutInner}>
+                        <Text style={[styles.donutText, { color: '#EF4444' }]}>{stats.pendingTasks.audio}</Text>
+                      </View>
+                    </View>
+                    <View style={{ alignItems: 'center', marginTop: 8 }}>
+                      <View style={styles.donutIconBox}>
+                        <FontAwesome5 name="microphone" size={12} color="#EF4444" />
+                      </View>
+                      <Text style={styles.donutLabel}>AUDIO</Text>
+                    </View>
+                  </View>
+
+                  {/* Divider */}
+                  <View style={styles.divider} />
+
+                  {/* Handwriting Donut */}
+                  <View style={styles.donutSection}>
+                    <View style={{ width: donutSize, height: donutSize, justifyContent: 'center', alignItems: 'center' }}>
+                      <Svg width={donutSize} height={donutSize}>
+                        <Circle cx={donutSize / 2} cy={donutSize / 2} r={radius} stroke="#E0E7FF" strokeWidth={strokeWidth} fill="transparent" />
+                        <Circle
+                          cx={donutSize / 2} cy={donutSize / 2} r={radius} stroke="#4F46E5" strokeWidth={strokeWidth}
+                          strokeDasharray={[circumference]} 
+                          strokeDashoffset={circumference * (1 - (stats.pendingTasks.handwriting / Math.max(stats.pendingTasks.total, 1)))} 
+                          strokeLinecap="round" fill="transparent" rotation="-90" origin={`${donutSize / 2}, ${donutSize / 2}`}
+                        />
+                      </Svg>
+                      <View style={styles.donutInner}>
+                        <Text style={[styles.donutText, { color: '#4F46E5' }]}>{stats.pendingTasks.handwriting}</Text>
+                      </View>
+                    </View>
+                    <View style={{ alignItems: 'center', marginTop: 8 }}>
+                      <View style={[styles.donutIconBox, { backgroundColor: '#EEF2FF' }]}>
+                        <FontAwesome5 name="pen" size={12} color="#4F46E5" />
+                      </View>
+                      <Text style={styles.donutLabel}>WRITING</Text>
+                    </View>
                   </View>
                 </View>
               </View>
@@ -314,7 +324,6 @@ export default function TeacherDashScreen({ navigation }) {
   );
 }
 
-// ... (Sub-components ActionBtn & Styles remain the same)
 const ActionBtn = ({ label, icon, color, bg, onPress }) => (
   <TouchableOpacity style={[styles.actionBtn, { backgroundColor: bg }]} onPress={onPress}>
     <FontAwesome5 name={icon} size={20} color={color} style={{ marginBottom: 8 }} />
@@ -330,6 +339,7 @@ const styles = StyleSheet.create({
   menuButton: { padding: 4 },
   scrollContent: { flex: 1 },
   contentPadding: { padding: 20 },
+  
   heroCard: { backgroundColor: '#fff', padding: 20, borderRadius: 24, borderWidth: 1, borderColor: '#e2e8f0', shadowColor: '#000', shadowOpacity: 0.02, shadowRadius: 8, elevation: 2, marginBottom: 20 },
   heroHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 },
   heroTitle: { fontSize: 10, fontWeight: 'bold', color: '#94a3b8', textTransform: 'uppercase', marginBottom: 4, letterSpacing: 0.5 },
@@ -337,35 +347,81 @@ const styles = StyleSheet.create({
   heroStatsRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8 },
   heroTrend: { flexDirection: 'row', alignItems: 'center', gap: 2, backgroundColor: '#f0fdf4', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
   heroTrendText: { fontSize: 10, fontWeight: 'bold', color: '#16a34a' },
-  moreBtn: { padding: 8, backgroundColor: '#f8fafc', borderRadius: 8 },
-  chartContainer: { height: 110, width: '100%', marginBottom: 12 }, // Increased height slightly
+  chartContainer: { height: 110, width: '100%', marginBottom: 12 },
   chartLabels: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 10 },
   chartLabel: { fontSize: 10, fontWeight: 'bold', color: '#94a3b8', textTransform: 'uppercase' },
-  secondaryCard: { backgroundColor: '#fff', padding: 16, borderRadius: 24, borderWidth: 1, borderColor: '#f1f5f9', shadowColor: '#000', shadowOpacity: 0.02, shadowRadius: 8, marginBottom: 24, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  
+  // COMMON STYLES
   cardSubtitle: { fontSize: 10, fontWeight: 'bold', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.5 },
-  timeRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 12 },
+  timeRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   timeText: { fontSize: 10, fontWeight: 'bold', color: '#94a3b8' },
-  miniStatsRow: { flexDirection: 'row', gap: 16 },
-  miniLabel: { fontSize: 9, fontWeight: 'bold', color: '#94a3b8' },
-  miniValue: { fontSize: 14, fontWeight: 'bold', color: '#1e293b' },
-  miniValueRed: { fontSize: 14, fontWeight: 'bold', color: '#ef4444' },
-  donutInner: { position: 'absolute', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%' },
-  donutText: { fontSize: 20, fontWeight: 'bold', color: '#4f46e5' },
-  donutSub: { fontSize: 12, color: '#cbd5e1' },
+  
+  // PENDING REVIEWS CARD STYLES
+  pendingCard: { 
+    backgroundColor: '#fff', 
+    padding: 16, 
+    borderRadius: 20, 
+    borderWidth: 1, 
+    borderColor: '#e2e8f0', 
+    shadowColor: '#000', 
+    shadowOpacity: 0.02, 
+    shadowRadius: 8, 
+    elevation: 2,
+    marginBottom: 24
+  },
+  pendingHeader: { 
+    flexDirection: 'row', 
+    justifyContent: 'space-between', 
+    alignItems: 'center', 
+    marginBottom: 16 
+  },
+  donutRow: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    justifyContent: 'space-around' 
+  },
+  donutSection: { 
+    flex: 1, 
+    alignItems: 'center' 
+  },
+  divider: { 
+    width: 1, 
+    height: 100, 
+    backgroundColor: '#e2e8f0' 
+  },
+  donutInner: { 
+    position: 'absolute', 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    width: '100%', 
+    height: '100%' 
+  },
+  donutText: { 
+    fontSize: 22, 
+    fontWeight: 'bold' 
+  },
+  donutIconBox: { 
+    width: 28, 
+    height: 28, 
+    borderRadius: 14, 
+    backgroundColor: '#FEE2E2', 
+    justifyContent: 'center', 
+    alignItems: 'center', 
+    marginBottom: 4 
+  },
+  donutLabel: { 
+    fontSize: 10, 
+    fontWeight: 'bold', 
+    color: '#64748b', 
+    letterSpacing: 0.5 
+  },
+  
   section: { marginBottom: 24 },
-  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  sectionTitle: { fontSize: 12, fontWeight: 'bold', color: '#64748b', textTransform: 'uppercase' },
-  viewAllText: { fontSize: 12, fontWeight: 'bold', color: '#4f46e5' },
-  alertCard: { backgroundColor: '#fff', borderRadius: 16, borderWidth: 1, borderColor: '#e2e8f0', overflow: 'hidden' },
-  alertItem: { flexDirection: 'row', alignItems: 'center', padding: 12, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
-  alertIconBox: { width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  alertTitle: { fontSize: 13, fontWeight: 'bold', color: '#1e293b' },
-  alertSub: { fontSize: 11, color: '#64748b' },
-  alertBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 },
-  alertBadgeText: { fontSize: 10, fontWeight: 'bold', color: '#fff' },
+  sectionTitle: { fontSize: 12, fontWeight: 'bold', color: '#64748b', textTransform: 'uppercase', marginBottom: 12 },
   actionGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
   actionBtn: { width: '48%', padding: 16, borderRadius: 16, alignItems: 'flex-start' },
   actionBtnText: { fontSize: 12, fontWeight: 'bold' },
+  
   bottomNav: { flexDirection: 'row', backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#e2e8f0', paddingVertical: 10, paddingBottom: Platform.OS === 'ios' ? 25 : 10, justifyContent: 'space-around', alignItems: 'center', elevation: 10 },
   navItem: { alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20 },
   navLabel: { fontSize: 10, fontWeight: '600', color: '#94a3b8', marginTop: 4 },
