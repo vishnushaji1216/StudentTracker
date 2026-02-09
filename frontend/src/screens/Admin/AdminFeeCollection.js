@@ -51,11 +51,29 @@ export default function AdminFeeCollection({ route, navigation }) {
   };
 
   const handleToggleLock = async () => {
+    // 1. Calculate the new desired state (If currently false, we want true)
+    const previousState = feeData.isLocked;
+    const newState = !previousState;
+
+    // 2. Optimistic Update: Flip the switch immediately on screen
+    setFeeData(prev => ({ ...prev, isLocked: newState }));
+
     try {
-      const res = await api.post('/admin/fees/lock', { studentId: student._id });
-      setFeeData(prev => ({ ...prev, isLocked: res.data.isLocked }));
-      Alert.alert("Success", `Student account is now ${res.data.isLocked ? 'Locked' : 'Active'}`);
+      // 3. Call API with 'lockStatus' (Required by your fee.controller.js)
+      const res = await api.post('/admin/fees/lock', { 
+        studentId: student._id,
+        lockStatus: newState  // <--- THIS WAS MISSING
+      });
+      
+      // 4. Sync with server response
+      // Your controller returns { isLocked: boolean }
+      if (res.data.isLocked !== newState) {
+         setFeeData(prev => ({ ...prev, isLocked: res.data.isLocked }));
+      }
+
     } catch (error) {
+      // 5. Rollback if error
+      setFeeData(prev => ({ ...prev, isLocked: previousState }));
       Alert.alert("Error", "Failed to update lock status");
     }
   };

@@ -580,53 +580,46 @@ export const getStudentFeeDetails = async (req, res) => {
   try {
     const { studentId } = req.params;
 
-    // 1. Fetch Student Info (to get mobile and lock status)
+    // 1. Fetch Student
     const studentDoc = await Student.findById(studentId);
-
-    // --- DEBUG LOGS ---
-    console.log("--- DEBUG: Fetching Student Details ---");
-    console.log("Student ID:", studentId);
-    if (studentDoc) {
-        console.log("Student Found:", studentDoc.name);
-        console.log("Mobile Number in DB:", studentDoc.mobile); // <--- CHECK THIS IN TERMINAL
-        console.log("Lock Status in DB:", studentDoc.isLocked);
-    } else {
-        console.log("!!! ERROR: Student not found in Database !!!");
-    }
-    // ------------------
-
     if (!studentDoc) return res.status(404).json({ message: "Student not found" });
 
-    // 2. Fetch all fees for this student
+    // 2. Fetch Fees
     const studentFees = await Fee.find({ student: studentId }).sort({ dueDate: 1 });
 
-    // 3. Extract transactions history
+    // ... (Your history logic here) ...
     let history = [];
     studentFees.forEach(fee => {
-      fee.transactions.forEach(txn => {
-        history.push({
-          feeTitle: fee.title,
-          amount: txn.amount,
-          date: txn.date,
-          mode: txn.mode,
-          note: txn.note
+      if (fee.transactions) {
+        fee.transactions.forEach(txn => {
+          history.push({
+            feeTitle: fee.title,
+            amount: txn.amount,
+            date: txn.date,
+            mode: txn.mode,
+            note: txn.note
+          });
         });
-      });
+      }
     });
-
     history.sort((a, b) => new Date(b.date) - new Date(a.date));
 
-    // 4. Send Corrected Response
+    // 3. SEND RESPONSE
     res.json({
       fees: studentFees.filter(f => f.status !== 'Paid'),
       history: history.slice(0, 10),
-      isLocked: studentDoc.isLocked || false, // Use the Student document, not the Fees array
-      contact: studentDoc.mobile || ""        // Use the Student document, not the Fees array
+      
+      // --- THE CRITICAL FIX ---
+      // Map the database field 'isFeeLocked' to the frontend key 'isLocked'
+      isLocked: studentDoc.isFeeLocked || false, 
+      // ------------------------
+
+      contact: studentDoc.mobile || ""
     });
 
   } catch (error) {
-    console.error("DEBUG ERROR:", error);
-    res.status(500).json({ message: "Error fetching fee details" });
+    console.error(error);
+    res.status(500).json({ message: "Error fetching details" });
   }
 };
 
