@@ -10,7 +10,8 @@ import {
   // --- NEW QUIZ IMPORTS ---
   getAvailableQuizzes,
   getQuizForStudent,
-  submitQuiz
+  submitQuiz,
+  getQuizResult
 } from "../controllers/student.controller.js";
 import auth from "../middleware/auth.middleware.js";
 
@@ -61,5 +62,6 @@ router.post("/submit", auth, studentCheck, upload.single('file'), submitAssignme
 router.get("/quizzes", auth, studentCheck, getAvailableQuizzes); // List of quizzes
 router.get("/quiz/:id", auth, studentCheck, getQuizForStudent); // Start specific quiz
 router.post("/quiz/submit", auth, studentCheck, submitQuiz); // Submit answers
+router.get("/quiz/:quizId/result", auth, studentCheck, getQuizResult);
 
 export default router;

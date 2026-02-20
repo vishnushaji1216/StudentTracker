@@ -74,21 +74,21 @@ export default function StudentQuizCenterScreen({ navigation }) {
     try {
       setLoading(true);
       const res = await api.get("/student/quizzes");
-      // console.log("Raw Data from Server:", res.data);
   
       const formatted = res.data.map(q => {
-        const rawStatus = q.status || (q.isTaken ? "COMPLETED" : "LIVE");
         return {
           id: q.id || q._id,
           title: q.title,
           subject: q.subject || "General",
           topic: q.topic || q.subject || "Quiz",
-          duration: q.duration ? `${q.duration} Mins` : "30 Mins",
-          status: rawStatus.toUpperCase(), 
-          totalQuestions: q.totalQuestions || 0,
+          duration: `${q.duration} Mins`,  // ✅ Backend now sends number
+          status: q.status,  // ✅ REMOVE .toUpperCase() - backend sends uppercase
+          totalQuestions: q.totalQuestions || 0,  // ✅ Now available from backend
           score: q.score,
           totalMarks: q.totalMarks,
-          startTime: q.startTime, // Ensure backend sends this
+          correctCount: q.correctCount || 0,  // ✅ ADD THIS
+          accuracy: q.accuracy || 0,          // ✅ ADD THIS
+          startTime: q.startTime,
           initials: q.subject ? q.subject.substring(0,2).toUpperCase() : "QZ",
           bg: '#eef2ff',
           color: '#4f46e5'

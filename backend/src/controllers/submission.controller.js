@@ -209,24 +209,32 @@ export const deleteHandwritingReview = async (req, res) => {
   }
 };
 
-export const getAudioQueue = async (req,res) => {
+export const getAudioQueue = async (req, res) => {
   try {
     const teacherId = req.user.id;
 
+    // Find assignments created by this teacher
     const myAssignments = await Assignment.find({ teacher: teacherId }).select('_id title');
     const myAssignmentIds = myAssignments.map(a => a._id);
 
+    // Find audio submissions that need grading
     const submissions = await Submission.find({
       type: 'audio', 
-      status: 'submitted', // submitted = pending review
+      status: { $in: ['submitted', 'pending'] }, // Accept both pending and submitted
       assignment: { $in: myAssignmentIds }
     })
     .populate('student', 'name rollNo profilePic') 
     .populate('assignment', 'title') 
-    .sort({ submittedAt: 1 }); 
+    .sort({ submittedAt: 1 }); // Oldest first
+
+    console.log(`📊 Found ${submissions.length} pending audio submissions for teacher ${teacherId}`);
 
     const queue = submissions.map(sub => {
-      if (!sub.student || !sub.assignment) return null;
+      // Safety check: ensure populated fields exist
+      if (!sub.student || !sub.assignment) {
+        console.log(`⚠️ Skipping submission ${sub._id} - missing student or assignment`);
+        return null;
+      }
 
       return {
         id: sub.student._id,
@@ -243,12 +251,12 @@ export const getAudioQueue = async (req,res) => {
         textColor: '#4f46e5',
         status: 'pending'
       };
-    }).filter(Boolean);
+    }).filter(Boolean); // Remove null entries
 
     res.json(queue);
 
   } catch (error) {
-    console.error("Audio Queue Error:", error);
+    console.error("❌ Audio Queue Error:", error);
     res.status(500).json({ message: "Failed to fetch audio queue" });
   }
 };

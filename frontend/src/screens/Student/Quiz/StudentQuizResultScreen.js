@@ -47,32 +47,27 @@ export default function StudentQuizResultScreen({ route, navigation }) {
         const user = JSON.parse(userStr);
         setStudentInfo({ name: user.name, class: user.className });
       }
+      
+      const res = await api.get(`/student/quiz/${quizId}/result`);
+      setResult({
+        title: res.data.title,
+        score: res.data.score,
+        total: res.data.total,
+        accuracy: res.data.accuracy,
+        correct: res.data.correctCount,
+        wrong: res.data.wrongCount,
+      });
 
-      // 2. Fetch specific submission for this quiz
-      // We call the quiz list which already includes the score logic
-      const res = await api.get("/student/quizzes");
-      const quizData = res.data.find(q => q.id === quizId || q._id === quizId);
-
-      if (quizData && quizData.status === "Completed") {
-        // Calculate Accuracy & Correct/Wrong count
-        // Note: For advanced breakdown (Correct/Wrong), you might need a dedicated submission detail endpoint
-        const accuracy = Math.round((quizData.score / quizData.totalMarks) * 100);
-        
-        setResult({
-          title: quizData.title,
-          score: quizData.score,        // The Marks (e.g. 18)
-          total: quizData.totalMarks,   // Total Marks (e.g. 20)
-          accuracy: quizData.accuracy,
-          correct: quizData.correctCount, // The Number of Questions (e.g. 9)
-          wrong: quizData.totalQuestions - quizData.correctCount, // (e.g. 1)
-        });
-      } else {
-        Alert.alert("Notice", "Result details not found.");
-        navigation.navigate("StudentQuizCenter");
-      }
     } catch (err) {
       console.error("Result fetch error:", err);
-      Alert.alert("Error", "Could not load results.");
+      
+      if (err.response?.status === 404) {
+        Alert.alert("Notice", "Result not found. You may not have completed this quiz yet.");
+      } else {
+        Alert.alert("Error", "Could not load results.");
+      }
+      
+      navigation.navigate("StudentQuizCenter");
     } finally {
       setLoading(false);
     }

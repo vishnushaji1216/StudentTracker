@@ -510,7 +510,9 @@ export const getAvailableQuizzes = async (req, res) => {
       className: student.className,
       type: "quiz",
       status: { $ne: "Draft" } 
-    }).sort({ scheduledAt: -1 });
+    })
+    .populate('quizId')  // ✅ ADD THIS - to get questions array
+    .sort({ scheduledAt: -1 });
 
     // 2. Get Student's submissions
     const mySubmissions = await Submission.find({ student: studentId, type: 'quiz' });
@@ -525,25 +527,42 @@ export const getAvailableQuizzes = async (req, res) => {
       const isStarted = now >= new Date(assign.scheduledAt);
       const isExpired = now > new Date(assign.dueDate);
 
-      // --- AUTOMATED STATUS LOGIC ---
-      let uiStatus = "Upcoming";
+      // --- AUTOMATED STATUS LOGIC (✅ UPPERCASE) ---
+      let uiStatus = "UPCOMING";  // ✅ CHANGED
       if (isTaken) {
-        uiStatus = "Completed";
+        uiStatus = "COMPLETED";  // ✅ CHANGED
       } else if (isExpired) {
-        uiStatus = "Expired"; // Automation: Tags as expired after dueDate
+        uiStatus = "EXPIRED";  // ✅ CHANGED
       } else if (isStarted) {
-        uiStatus = "Live";
+        uiStatus = "LIVE";  // ✅ CHANGED
+      }
+
+      // ✅ ADD THIS - Calculate totalQuestions
+      const totalQuestions = assign.quizId?.questions?.length || 0;
+
+      // ✅ ADD THIS - Calculate correctCount and accuracy
+      let correctCount = 0;
+      let accuracy = 0;
+      
+      if (isTaken && submission.quizResponses) {
+        correctCount = submission.quizResponses.filter(r => r.isCorrect).length;
+        accuracy = totalQuestions > 0 
+          ? Math.round((correctCount / totalQuestions) * 100) 
+          : 0;
       }
 
       return {
-        id: assign.quizId,
+        id: assign.quizId?._id,  // ✅ CHANGED - add ?._id
         assignmentId: assign._id,
         title: assign.title,
         subject: assign.subject || "General",
-        duration: `${assign.duration} Mins`,
-        status: uiStatus, // Now dynamic: Upcoming, Live, Completed, or Expired
+        duration: assign.duration,  // ✅ CHANGED - Remove string formatting, send as number
+        status: uiStatus,
         score: isTaken ? submission.obtainedMarks : null,
         totalMarks: assign.totalMarks,
+        totalQuestions: totalQuestions,  // ✅ ADD THIS
+        correctCount: correctCount,      // ✅ ADD THIS
+        accuracy: accuracy,              // ✅ ADD THIS
         endTime: assign.dueDate,
         startTime: assign.scheduledAt
       };
@@ -551,6 +570,7 @@ export const getAvailableQuizzes = async (req, res) => {
 
     res.json(quizzes);
   } catch (error) {
+    console.error("Get Available Quizzes Error:", error);  // ✅ ADD - Better error logging
     res.status(500).json({ message: "Failed to fetch quizzes" });
   }
 };
@@ -639,12 +659,16 @@ export const submitQuiz = async (req, res) => {
 
     console.log(`FINAL SCORE: ${score}/${quiz.totalMarks}`);
 
+    // ✅ ADD THIS - Calculate these BEFORE creating submission
+    const totalQuestions = quiz.questions.length;
+    const accuracy = Math.round((correctCount / totalQuestions) * 100);
+
     await Submission.create({
       student: studentId,
       teacher: quiz.teacher,
       quiz: quizId,
       type: 'quiz',
-      status: 'Graded',
+      status: 'graded',  // ✅ Already correct (lowercase)
       obtainedMarks: score,
       totalMarks: quiz.totalMarks,
       quizResponses: gradedResponses,
@@ -655,8 +679,9 @@ export const submitQuiz = async (req, res) => {
       message: "Quiz submitted!", 
       score, 
       total: quiz.totalMarks,
-      correctCount,
-      totalQuestions: quiz.questions.length,
+      correctCount,           // ✅ Already included
+      totalQuestions,         // ✅ Now calculated above
+      accuracy,               // ✅ Now calculated above (removed "const")
       gradedResponses 
     });
 
@@ -664,4 +689,53 @@ export const submitQuiz = async (req, res) => {
     console.error("Submission Error:", error);
     res.status(500).json({ message: "Submission failed", error: error.message });
   }
-};                        
+};
+
+// 4. GET QUIZ RESULT DETAILS
+export const getQuizResult = async (req, res) => {
+  try {
+    const { quizId } = req.params;
+    const studentId = req.user.id;
+
+    console.log(`📊 Fetching result for Quiz: ${quizId}, Student: ${studentId}`);
+
+    // Find the submission
+    const submission = await Submission.findOne({
+      student: studentId,
+      quiz: quizId,
+      type: 'quiz',
+      status: 'graded'
+    })
+    .populate('quiz', 'title questions totalMarks')
+    .populate('student', 'name className');
+
+    if (!submission) {
+      return res.status(404).json({ message: "Result not found" });
+    }
+
+    // Calculate stats
+    const totalQuestions = submission.quiz.questions.length;
+    const correctCount = submission.quizResponses.filter(r => r.isCorrect).length;
+    const wrongCount = totalQuestions - correctCount;
+    const accuracy = totalQuestions > 0 
+      ? Math.round((correctCount / totalQuestions) * 100) 
+      : 0;
+
+    // Return detailed result
+    res.json({
+      title: submission.quiz.title,
+      score: submission.obtainedMarks,
+      total: submission.quiz.totalMarks,
+      totalQuestions: totalQuestions,
+      correctCount: correctCount,
+      wrongCount: wrongCount,
+      accuracy: accuracy,
+      submittedAt: submission.submittedAt,
+      responses: submission.quizResponses  // Question-by-question breakdown
+    });
+
+  } catch (error) {
+    console.error("Get Quiz Result Error:", error);
+    res.status(500).json({ message: "Failed to fetch result" });
+  }
+};
