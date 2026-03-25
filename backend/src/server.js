@@ -8,10 +8,12 @@ import adminRoutes from "./routes/admin.routes.js";
 import teacherRoutes from "./routes/teacher.routes.js";
 import studentRoutes from "./routes/student.routes.js";
 
-import { startHandwritingResetCron } from "./utils/handwritingResetCron.js";
+import { startSubmissionCleanupCron } from "./utils/submissionCron.js";
 
 dotenv.config();
 connectDB();
+
+startSubmissionCleanupCron();
 
 const app = express();
 

@@ -12,7 +12,8 @@ if (Platform.OS === "android") {
 
 export default function QuizPlayerScreen({ route, navigation }) {
   const { quizId } = route.params;
-
+  const answersRef = useRef({});
+  const hasSubmitted = useRef(false);
   const [quizData, setQuizData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
@@ -52,7 +53,6 @@ export default function QuizPlayerScreen({ route, navigation }) {
 
   useEffect(() => {
     const backHandler = BackHandler.addEventListener("hardwareBackPress", () => {
-      if (reviewMode) { navigation.goBack(); return true; }
       Alert.alert("Quit Quiz?", "Progress will be lost.", [
         { text: "Cancel", style: "cancel" },
         { text: "Quit", style: "destructive", onPress: () => navigation.goBack() }
@@ -60,15 +60,17 @@ export default function QuizPlayerScreen({ route, navigation }) {
       return true;
     });
     return () => backHandler.remove();
-  }, [reviewMode]);
+  }, []);
 
   const formatTime = s => `${Math.floor(s / 60)}:${s % 60 < 10 ? "0" : ""}${s % 60}`;
 
   // FIX: Store the INDEX (0, 1, 2) not the text
-  const selectOption = (index) => { 
-      if (!reviewMode) {
-          setAnswers({ ...answers, [currentQuestionIndex]: index }); 
-      }
+  const selectOption = (index) => {
+    if (!reviewMode) {
+      const updated = { ...answers, [currentQuestionIndex]: index };
+      setAnswers(updated);
+      answersRef.current = updated;  // ✅ Keep ref in sync
+    }
   };
 
   const handleNext = () => {
@@ -86,18 +88,21 @@ export default function QuizPlayerScreen({ route, navigation }) {
   };
 
   const submitQuiz = async () => {
+    if (hasSubmitted.current) return;
+    hasSubmitted.current = true;
+  
     try {
       setLoading(true);
-      // Construct responses using stored INDICES
-      const responses = Object.keys(answers).map(i => ({ 
-          questionIndex: parseInt(i), 
-          selectedOption: answers[i] // This is now a number (0,1,2)
+      const responses = Object.keys(answersRef.current).map(i => ({  // ✅ Use ref here
+        questionIndex: parseInt(i),
+        selectedOption: answersRef.current[i]
       }));
-      
-      const res = await api.post("/student/quiz/submit", { quizId, responses });
-      setGradedData(res.data.gradedResponses || []);
-      setReviewMode(true);
-    } catch {
+  
+      await api.post("/student/quiz/submit", { quizId, responses });
+      navigation.replace("StudentQuizResult", { quizId });
+  
+    } catch (e) {
+      hasSubmitted.current = false;
       Alert.alert("Error", "Submission failed.");
     } finally {
       setLoading(false);
@@ -178,7 +183,7 @@ export default function QuizPlayerScreen({ route, navigation }) {
           <Text style={styles.prevText}>Prev</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.nextBtn} onPress={handleNext}>
-          <Text style={styles.nextText}>{reviewMode ? "Done" : currentQuestionIndex === quizData.questions.length - 1 ? "Submit" : "Next"}</Text>
+          <Text style={styles.nextText}>{currentQuestionIndex === quizData.questions.length - 1 ? "Submit" : "Next"}</Text>
         </TouchableOpacity>
       </SafeAreaView>
     </View>

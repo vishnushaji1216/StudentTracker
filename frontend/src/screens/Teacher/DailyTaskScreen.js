@@ -267,7 +267,7 @@ export default function DailyTaskScreen({ navigation }) {
 
     // Format deadline
     const deadline = new Date(item.dueDate);
-    const timeString = deadline.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const timeString = new Date(deadline).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
     return (
       <View style={[styles.card, { borderLeftColor: color }]}>

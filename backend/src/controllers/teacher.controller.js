@@ -427,25 +427,46 @@ export const getTeacherDashboardStats = async (req, res) => {
 export const getAssignments = async (req, res) => {
   try {
     const teacherId = req.user.id;
+    const now = new Date();
+
+    // Fetch assignments
     const assignments = await Assignment.find({ 
       teacher: teacherId, 
       status: { $ne: 'Draft' },
       isOffline: { $ne: true } 
-  }).sort({ createdAt: -1 });
+    }).sort({ createdAt: -1 });
 
     const dataWithCounts = await Promise.all(assignments.map(async (task) => {
       const count = await Submission.countDocuments({ 
           assignment: task._id,
-          status: { $in: ['submitted', 'graded', 'Submitted', 'Graded'] }
+          status: { $in: ['submitted', 'graded'] }  // ✅ lowercase only
       });
+
+      // ✅ AUTO-EXPIRE LOGIC
+      let finalStatus = task.status;
+      
+      // If quiz/assignment is Active but past due date → Mark as Completed
+      if (task.status === 'Active' && task.dueDate && now > new Date(task.dueDate)) {
+        finalStatus = 'Completed';
+        
+        // Update in database
+        task.status = 'Completed';
+        await task.save();
+      }
       
       return {
           ...task.toObject(),
+          status: finalStatus,  // ✅ Return updated status
           submissionCount: count 
       };
-  }));
-    res.status(200).json(dataWithCounts);
+    }));
+
+    // ✅ FILTER OUT COMPLETED (expired) items
+    const activeOnly = dataWithCounts.filter(task => task.status !== 'Completed');
+
+    res.status(200).json(activeOnly);  // ✅ Return only active items
   } catch (error) {
+    console.error("Get Assignments Error:", error);
     res.status(500).json({ message: "Failed to fetch assignments" });
   }
 };
@@ -640,6 +661,15 @@ export const createQuiz = async (req, res) => {
     const safeDuration = Number(duration) || 10;
     const endAt = new Date(startAt.getTime() + safeDuration * 60000);
 
+    console.log('\n🔍 QUIZ CREATION DEBUG:');
+console.log('Release Type:', releaseType);
+console.log('Duration received:', duration);
+console.log('Duration (minutes):', safeDuration);
+console.log('Start Time (scheduledAt):', startAt.toISOString());
+console.log('End Time (dueDate):', endAt.toISOString());
+console.log('Current Server Time:', new Date().toISOString());
+console.log('Time difference (minutes):', (endAt - startAt) / 60000);
+
     const newAssignment = new Assignment({
       teacher: teacherId,
       quizId: savedQuiz._id,
@@ -688,31 +718,73 @@ export const updateQuiz = async (req, res) => {
     const { id } = req.params;
     const { title, duration, passingScore, questions, status, scheduledAt } = req.body;
 
+    // ✅ Block editing completed quizzes
+    const existing = await Assignment.findById(id);
+    if (!existing) return res.status(404).json({ message: "Quiz not found" });
+    if (existing.status === "Completed") {
+      return res.status(403).json({ message: "Cannot edit a completed quiz" });
+    }
+
     let updateData = { title, duration, passingScore, status };
 
     if (scheduledAt) {
       const startAt = new Date(scheduledAt);
       const safeDuration = Number(duration) || 10;
       const endAt = new Date(startAt.getTime() + safeDuration * 60000);
+
       updateData.scheduledAt = startAt;
       updateData.dueDate = endAt;
-  }
+    }
 
-  const assignment = await Assignment.findByIdAndUpdate(id, updateData, { new: true });
+    const assignment = await Assignment.findByIdAndUpdate(id, updateData, { new: true });
 
     if (assignment.quizId && questions) {
       const newTotal = questions.reduce((sum, q) => sum + (Number(q.marks) || 1), 0);
+
       await Quiz.findByIdAndUpdate(assignment.quizId, {
         questions: questions,
         totalMarks: newTotal
       });
+
       assignment.totalMarks = newTotal;
       await assignment.save();
     }
 
     res.json({ message: "Updated Successfully", assignment });
+
   } catch (error) {
-    res.status(500).json({ message: "Update failed"});
+    res.status(500).json({ message: "Update failed" });
+  }
+};
+
+export const deleteQuiz = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const existing = await Assignment.findById(id);
+    if (!existing) {
+      return res.status(404).json({ message: "Quiz not found" });
+    }
+
+    // Count submissions
+    const submissionCount = await Submission.countDocuments({ assignment: id });
+
+    if (submissionCount > 0) {
+      return res.status(403).json({
+        message: "Cannot delete a quiz that has submissions"
+      });
+    }
+
+    await Assignment.findByIdAndDelete(id);
+
+    if (existing.quizId) {
+      await Quiz.findByIdAndDelete(existing.quizId);
+    }
+
+    res.json({ message: "Quiz deleted successfully" });
+
+  } catch (error) {
+    res.status(500).json({ message: "Failed to delete quiz" });
   }
 };
 

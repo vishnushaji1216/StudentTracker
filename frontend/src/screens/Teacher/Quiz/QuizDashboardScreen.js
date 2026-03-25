@@ -132,9 +132,10 @@ export default function QuizDashboardScreen({ navigation }) {
 
   const renderQuizCard = ({ item }) => {
     const isLive = item.status === 'Active';
+    const isCompleted = item.status === 'Completed';
     const statusColor = isLive ? '#16a34a' : (item.status === 'Draft' ? '#94a3b8' : '#4f46e5');
     const borderLeftColor = isLive ? '#22c55e' : (item.status === 'Draft' ? '#cbd5e1' : '#6366f1');
-
+  
     return (
       <Animated.View style={[styles.card, { borderLeftColor: borderLeftColor, opacity: fadeAnim }]}>
         <View style={styles.cardHeader}>
@@ -142,42 +143,63 @@ export default function QuizDashboardScreen({ navigation }) {
             <Text style={styles.cardTitle} numberOfLines={1}>{item.title}</Text>
             <Text style={styles.cardSub}>{item.className} • {item.subject}</Text>
           </View>
-          <TouchableOpacity onPress={() => handleDelete(item._id, item.title)} style={styles.deleteBtn}>
-             <FontAwesome5 name="trash" size={14} color="#ef4444" />
-          </TouchableOpacity>
+  
+          {/* Hide delete button for completed quizzes */}
+          {!isCompleted && (
+            <TouchableOpacity onPress={() => handleDelete(item._id, item.title)} style={styles.deleteBtn}>
+              <FontAwesome5 name="trash" size={14} color="#ef4444" />
+            </TouchableOpacity>
+          )}
         </View>
-
+  
         <View style={styles.cardBody}>
           <View style={styles.infoRow}>
             <View style={styles.infoItem}>
               <FontAwesome5 name="clock" size={12} color="#64748b" />
               <Text style={styles.infoText}>
-                {isLive || item.status === 'Scheduled' ? getTimeRemaining(item) : `${item.duration} min`}
+                {isLive || item.status === 'Scheduled'
+                  ? getTimeRemaining(item)
+                  : `${item.duration} min`}
               </Text>
             </View>
+  
             <View style={styles.infoItem}>
               <FontAwesome5 name="list-ol" size={12} color="#64748b" />
               <Text style={styles.infoText}>{item.questionCount || 0} Qs</Text>
             </View>
+  
             <View style={[styles.statusBadge, { backgroundColor: isLive ? '#dcfce7' : '#f1f5f9' }]}>
-                <Text style={[styles.statusText, { color: statusColor }]}>
+              <Text style={[styles.statusText, { color: statusColor }]}>
                 {isLive ? 'LIVE' : item.status.toUpperCase()}
-                </Text>
+              </Text>
             </View>
           </View>
         </View>
-
+  
         <View style={styles.cardFooter}>
-          <TouchableOpacity style={styles.actionBtn} onPress={() => handleEdit(item._id)}>
-             <FontAwesome5 name="edit" size={12} color="#64748b" />
-             <Text style={styles.actionText}>Edit</Text>
-          </TouchableOpacity>
-          {activeTab !== 'Draft' && item.status === 'Active' && ( 
-            <TouchableOpacity style={styles.actionBtn} onPress={() => handleMonitor(item._id)}>
-                <FontAwesome5 name="chart-pie" size={12} color="#4f46e5" />
-                <Text style={[styles.actionText, {color:'#4f46e5'}]}>Monitor</Text>
+          {/* Hide edit button for completed quizzes */}
+          {!isCompleted && (
+            <TouchableOpacity style={styles.actionBtn} onPress={() => handleEdit(item._id)}>
+              <FontAwesome5 name="edit" size={12} color="#64748b" />
+              <Text style={styles.actionText}>Edit</Text>
             </TouchableOpacity>
-        )}
+          )}
+  
+          {/* Monitor for live quizzes */}
+          {isLive && (
+            <TouchableOpacity style={styles.actionBtn} onPress={() => handleMonitor(item._id)}>
+              <FontAwesome5 name="chart-pie" size={12} color="#4f46e5" />
+              <Text style={[styles.actionText, {color:'#4f46e5'}]}>Monitor</Text>
+            </TouchableOpacity>
+          )}
+  
+          {/* Show submissions for completed quizzes */}
+          {isCompleted && (
+            <View style={styles.actionBtn}>
+              <FontAwesome5 name="users" size={12} color="#64748b" />
+              <Text style={styles.actionText}>{item.submittedCount || 0} Submissions</Text>
+            </View>
+          )}
         </View>
       </Animated.View>
     );

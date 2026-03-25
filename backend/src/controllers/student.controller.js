@@ -663,12 +663,17 @@ export const submitQuiz = async (req, res) => {
     const totalQuestions = quiz.questions.length;
     const accuracy = Math.round((correctCount / totalQuestions) * 100);
 
+    const assignment = await Assignment.findOne({ quizId });
+    const subject = assignment?.subject || "General";
+
     await Submission.create({
       student: studentId,
       teacher: quiz.teacher,
       quiz: quizId,
+      assignment: assignment?._id,
       type: 'quiz',
-      status: 'graded',  // ✅ Already correct (lowercase)
+      status: 'graded',
+      subject: subject,
       obtainedMarks: score,
       totalMarks: quiz.totalMarks,
       quizResponses: gradedResponses,
