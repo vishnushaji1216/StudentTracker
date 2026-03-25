@@ -23,7 +23,7 @@ const SIDEBAR_WIDTH = 280;
 const MOCK_DATA = {
   date: "Monday, 24 Oct",
   financial: {
-    collectedToday: "42,500",
+    collectedMonthly: "4,25,000",
     isCritical: false
   },
   alerts: {
@@ -155,10 +155,10 @@ export default function AdminDashScreen({ navigation }) {
             onPress={() => setShowFinance(!showFinance)}
           >
             <View>
-              <Text style={styles.finLabel}>COLLECTED TODAY</Text>
+              <Text style={styles.finLabel}>COLLECTED THIS MONTH</Text>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                 {showFinance ? (
-                  <Text style={styles.finAmount}>₹ {MOCK_DATA.financial.collectedToday}</Text>
+                  <Text style={styles.finAmount}>₹ {MOCK_DATA.financial.collectedMonthly}</Text>
                 ) : (
                   <View style={styles.hiddenAmount}>
                     <View style={styles.dot} /><View style={styles.dot} /><View style={styles.dot} /><View style={styles.dot} />

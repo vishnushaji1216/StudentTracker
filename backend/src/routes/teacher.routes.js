@@ -20,7 +20,8 @@ import {
   getTeacherDashboardStats,
   getStudentReport,
   getClassSubjects,
-  getMyClassDefaulters
+  getMyClassDefaulters,
+  getQuizAnalytics
 } from "../controllers/teacher.controller.js";
 import { 
    logHandwritingReview, 
@@ -86,6 +87,7 @@ router.delete("/assignments/:id", auth, teacherCheck, deleteAssignment);
 router.get("/quizzes", auth, teacherCheck, getQuizDashboard);
 router.post("/quizzes", auth, teacherCheck, createQuiz);
 router.get("/quizzes/:id", auth, teacherCheck, getQuizDetail);
+router.get("/quizzes/:id/analytics", auth, teacherCheck, getQuizAnalytics);
 router.put("/quizzes/:id", auth, teacherCheck, updateQuiz);
 
 /* =====================================================

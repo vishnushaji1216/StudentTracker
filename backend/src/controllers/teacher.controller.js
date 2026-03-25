@@ -1110,3 +1110,71 @@ export const getMyClassDefaulters = async (req, res) => {
     res.status(500).json({ message: "Server error fetching class fee status" });
   }
 };
+// --- QUIZ ANALYTICS ---
+export const getQuizAnalytics = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // 1. Fetch Quiz Assignment
+    const assignment = await Assignment.findById(id).populate('quizId');
+    if (!assignment) return res.status(404).json({ message: "Quiz not found" });
+
+    // 2. Fetch all submissions for this quiz
+    const submissions = await Submission.find({ assignment: id })
+      .populate('student', 'name rollNo profilePic')
+      .sort({ obtainedMarks: -1 });
+
+    const totalStudents = assignment.assignedCount || 0;
+    const submittedCount = submissions.length;
+    const totalMarks = assignment.totalMarks || 100;
+
+    // 3. Calculate Analytics
+    let totalObtained = 0;
+    submissions.forEach(s => {
+        totalObtained += (s.obtainedMarks || 0);
+    });
+    
+    const classAvg = submittedCount > 0 
+      ? Math.round((totalObtained / (submittedCount * totalMarks)) * 100) 
+      : 0;
+
+    // 4. Map Performers (Match the schema used in QuizResultScreen.js)
+    const topPerformers = submissions.slice(0, 5).map((s, index) => ({
+      id: s.student?._id,
+      name: s.student?.name || "Unknown Student",
+      score: `${s.obtainedMarks}/${totalMarks}`,
+      rank: index + 1,
+      // Colors for ranking (Gold, Silver, Bronze, etc.)
+      color: index === 0 ? '#ca8a04' : (index === 1 ? '#475569' : (index === 2 ? '#b45309' : '#64748b')),
+      bg: index === 0 ? '#fefce8' : (index === 1 ? '#f8fafc' : (index === 2 ? '#fff7ed' : '#f1f5f9')),
+      border: index === 0 ? '#fef08a' : (index === 1 ? '#e2e8f0' : (index === 2 ? '#ffedd5' : '#e2e8f0'))
+    }));
+
+    const needsHelp = submissions
+      .filter(s => (s.obtainedMarks / totalMarks) < 0.4)
+      .map(s => ({
+        id: s.student?._id,
+        name: s.student?.name || "Unknown Student",
+        score: `${s.obtainedMarks}/${totalMarks}`,
+        percent: `${Math.round((s.obtainedMarks / totalMarks) * 100)}%`
+      }));
+
+    res.json({
+      title: assignment.title,
+      className: assignment.className,
+      subject: assignment.subject,
+      stats: {
+        totalStudents,
+        submittedCount,
+        classAvg: `${classAvg}%`,
+        totalMarks
+      },
+      topPerformers,
+      needsHelp
+    });
+
+  } catch (error) {
+    console.error("Quiz Analytics Error:", error);
+    res.status(500).json({ message: "Failed to load analytics" });
+  }
+};

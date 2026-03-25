@@ -12,33 +12,60 @@ import {
   Platform,
   LayoutAnimation,
   UIManager,
-  FlatList
+  FlatList,
+  ActivityIndicator,
+  Alert
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import FontAwesome5 from "react-native-vector-icons/FontAwesome5";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import api from "../../../services/api";
 
 const SIDEBAR_WIDTH = 280;
 
-// Mock Data
-const TOP_PERFORMERS = [
-  { id: '1', name: 'Arjun', score: '20/20', rank: 1, color: '#ca8a04', bg: '#fefce8', border: '#fef08a' }, // Gold
-  { id: '2', name: 'Fatima', score: '19/20', rank: 2, color: '#475569', bg: '#f8fafc', border: '#e2e8f0' }, // Silver
-  { id: '3', name: 'Karan', score: '18/20', rank: 3, color: '#b45309', bg: '#fff7ed', border: '#ffedd5' }, // Bronze
-  { id: '4', name: 'Priya', score: '17/20', rank: 4, color: '#64748b', bg: '#f1f5f9', border: '#e2e8f0' },
-];
+export default function QuizResultScreen({ route, navigation }) {
+  const { quizId, quizTitle } = route.params || {};
 
-const NEEDS_HELP = [
-  { id: '1', name: 'Diya Singh', score: '8/20', percent: '40%' },
-  { id: '2', name: 'Rohan Das', score: '6/20', percent: '30%' },
-  { id: '3', name: 'Amit Patel', score: '5/20', percent: '25%' },
-];
+  const [loading, setLoading] = useState(true);
+  const [analytics, setAnalytics] = useState(null);
+  const [teacherInfo, setTeacherInfo] = useState({ name: "Teacher", code: "", class: "" });
 
-export default function QuizResultScreen({ navigation }) {
   // Sidebar State
   const slideAnim = useRef(new Animated.Value(-SIDEBAR_WIDTH)).current;
   const overlayAnim = useRef(new Animated.Value(0)).current;
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    fetchData();
+  }, [quizId]);
+
+  const fetchData = async () => {
+    try {
+      setLoading(true);
+      
+      // 1. Get Teacher Info from Storage
+      const userStr = await AsyncStorage.getItem("user");
+      if (userStr) {
+        const user = JSON.parse(userStr);
+        setTeacherInfo({ 
+          name: user.name || "Teacher", 
+          code: user.teacherCode || "",
+          class: user.classTeachership || ""
+        });
+      }
+
+      // 2. Fetch Analytics
+      const res = await api.get(`/teacher/quizzes/${quizId}/analytics`);
+      setAnalytics(res.data);
+
+    } catch (err) {
+      console.error("Analytics fetch error:", err);
+      Alert.alert("Error", "Could not load quiz analytics.");
+      navigation.goBack();
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Handle Android Back Button
   useEffect(() => {
@@ -95,16 +122,18 @@ export default function QuizResultScreen({ navigation }) {
             {/* Sidebar Header */}
             <View style={styles.sidebarHeader}>
               <Image 
-                source={{ uri: "https://i.pravatar.cc/150?img=5" }} 
+                source={{ uri: `https://ui-avatars.com/api/?name=${teacherInfo.name}&background=eef2ff&color=4f46e5` }} 
                 style={styles.profilePic} 
               />
               <View>
-                <Text style={styles.teacherName}>Priya Sharma</Text>
-                <Text style={styles.teacherCode}>T-2025-08</Text>
+                <Text style={styles.teacherName}>{teacherInfo.name}</Text>
+                <Text style={styles.teacherCode}>{teacherInfo.code}</Text>
               </View>
-              <View style={styles.classTag}>
-                <Text style={styles.classTagText}>Class Teacher: 9-A</Text>
-              </View>
+              {teacherInfo.class ? (
+                <View style={styles.classTag}>
+                  <Text style={styles.classTagText}>Class Teacher: {teacherInfo.class}</Text>
+                </View>
+              ) : null}
             </View>
 
             {/* Navigation Items (Corrected Teacher Menu) */}
@@ -188,7 +217,7 @@ export default function QuizResultScreen({ navigation }) {
               <FontAwesome5 name="arrow-left" size={20} color="#94a3b8" />
             </TouchableOpacity>
             <View>
-              <Text style={styles.headerTitle}>Results: Math Test</Text>
+              <Text style={styles.headerTitle}>{analytics?.title || quizTitle || "Quiz Results"}</Text>
             </View>
           </View>
           <TouchableOpacity onPress={toggleSidebar}>
@@ -196,51 +225,72 @@ export default function QuizResultScreen({ navigation }) {
           </TouchableOpacity>
         </View>
 
-        <ScrollView 
-          style={styles.scrollContent} 
-          contentContainerStyle={{ paddingBottom: 100 }} 
-          showsVerticalScrollIndicator={false}
-        >
-          <View style={styles.contentPadding}>
-            
-            {/* 1. Summary Card */}
-            <View style={styles.summaryCard}>
-              <Text style={styles.summaryLabel}>CLASS AVERAGE</Text>
-              <Text style={styles.summaryValue}>72%</Text>
-              <View style={styles.trendRow}>
-                <Text style={styles.trendText}>+5% vs Last Quiz</Text>
-              </View>
-            </View>
-
-            {/* 2. Top Performers */}
-            <Text style={styles.sectionTitle}>TOP PERFORMERS</Text>
-            <View style={{ marginBottom: 24 }}>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 4 }}>
-                {TOP_PERFORMERS.map((student) => (
-                  <View key={student.id} style={styles.rankCard}>
-                    <View style={[styles.rankCircle, { backgroundColor: student.bg, borderColor: student.border }]}>
-                      <Text style={[styles.rankText, { color: student.color }]}>{student.rank}</Text>
-                    </View>
-                    <Text style={styles.rankName}>{student.name}</Text>
-                    <Text style={styles.rankScore}>{student.score}</Text>
-                  </View>
-                ))}
-              </ScrollView>
-            </View>
-
-            {/* 3. Needs Help */}
-            <Text style={styles.sectionTitle}>NEEDS HELP ({'<'} 40%)</Text>
-            <View style={styles.needsHelpList}>
-              {NEEDS_HELP.map((student) => (
-                <View key={student.id} style={styles.helpItem}>
-                  <Text style={styles.helpName}>{student.name}</Text>
-                  <Text style={styles.helpScore}>{student.score}</Text>
-                </View>
-              ))}
-            </View>
-
+        {loading ? (
+          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+            <ActivityIndicator size="large" color="#4f46e5" />
+            <Text style={{ marginTop: 12, color: '#64748b' }}>Loading Analytics...</Text>
           </View>
-        </ScrollView>
+        ) : (
+          <ScrollView 
+            style={styles.scrollContent} 
+            contentContainerStyle={{ paddingBottom: 100 }} 
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={styles.contentPadding}>
+              
+              {/* 1. Summary Card */}
+              <View style={styles.summaryCard}>
+                <Text style={styles.summaryLabel}>CLASS AVERAGE</Text>
+                <Text style={styles.summaryValue}>{analytics?.stats?.classAvg || "0%"}</Text>
+                <View style={styles.trendRow}>
+                  <Text style={styles.trendText}>
+                    {analytics?.stats?.submittedCount || 0} / {analytics?.stats?.totalStudents || 0} Students Submitted
+                  </Text>
+                </View>
+              </View>
+
+              {/* 2. Top Performers */}
+              <Text style={styles.sectionTitle}>TOP PERFORMERS</Text>
+              <View style={{ marginBottom: 24 }}>
+                {analytics?.topPerformers?.length > 0 ? (
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 4 }}>
+                    {analytics.topPerformers.map((student, index) => (
+                      <View key={student.id || index} style={styles.rankCard}>
+                        <View style={[styles.rankCircle, { backgroundColor: student.bg, borderColor: student.border }]}>
+                          <Text style={[styles.rankText, { color: student.color }]}>{student.rank || (index + 1)}</Text>
+                        </View>
+                        <Text style={styles.rankName} numberOfLines={1}>{student.name}</Text>
+                        <Text style={styles.rankScore}>{student.score}</Text>
+                      </View>
+                    ))}
+                  </ScrollView>
+                ) : (
+                  <View style={styles.emptyCard}>
+                    <Text style={styles.emptyText}>No submissions yet.</Text>
+                  </View>
+                )}
+              </View>
+
+              {/* 3. Needs Help */}
+              <Text style={styles.sectionTitle}>NEEDS HELP ({'<'} 40%)</Text>
+              <View style={styles.needsHelpList}>
+                {analytics?.needsHelp?.length > 0 ? (
+                  analytics.needsHelp.map((student, index) => (
+                    <View key={student.id || index} style={styles.helpItem}>
+                      <Text style={styles.helpName}>{student.name}</Text>
+                      <Text style={styles.helpScore}>{student.score} ({student.percent})</Text>
+                    </View>
+                  ))
+                ) : (
+                  <View style={styles.helpEmpty}>
+                    <Text style={styles.helpEmptyText}>All students above threshold!</Text>
+                  </View>
+                )}
+              </View>
+
+            </View>
+          </ScrollView>
+        )}
 
         {/* BOTTOM NAV */}
         <View style={styles.bottomNav}>
@@ -284,20 +334,18 @@ const styles = StyleSheet.create({
   sidebar: { position: "absolute", left: 0, top: 0, bottom: 0, width: SIDEBAR_WIDTH, backgroundColor: "#fff", zIndex: 51, elevation: 20 },
   sidebarContainer: { flex: 1, paddingTop: Platform.OS === 'ios' ? 50 : 20, paddingHorizontal: 20, paddingBottom: 20, justifyContent: 'space-between' },
   sidebarHeader: { marginBottom: 10,paddingBottom: 20,borderBottomWidth: 1, borderBottomColor: '#F1F5F9',flexDirection: 'column', gap: 12},
-  profileRow: {flexDirection: 'row',alignItems: 'center',gap: 12},
   profilePic: { width: 50, height: 50, borderRadius: 25, borderWidth: 1, borderColor: '#e2e8f0' },
   teacherName: { fontSize: 16, fontWeight: 'bold', color: '#1e293b' },
   teacherCode: { fontSize: 12, color: '#64748b' },
-  classTag: { marginTop: 0, alignSelf: 'flex-start',  backgroundColor: '#eef2ff', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20, marginLeft: 62 },
+  classTag: { alignSelf: 'flex-start',  backgroundColor: '#eef2ff', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
   classTagText: { fontSize: 10, fontWeight: 'bold', color: '#4f46e5', textTransform: 'uppercase' },
   menuScroll: { marginTop: 20, flex: 1 },
   menuDivider: { height: 1, backgroundColor: '#f1f5f9', marginVertical: 10 },
   menuSectionLabel: { fontSize: 10, fontWeight: 'bold', color: '#94a3b8', marginBottom: 8, marginLeft: 12, letterSpacing: 0.5 },
   sidebarItem: { flexDirection: 'row', alignItems: 'center', padding: 12, borderRadius: 12 },
   sidebarItemActive: { backgroundColor: '#eef2ff' },
-  sidebarItemText: { fontSize: 14, fontWeight: '600', color: '#64748b' },
+  sidebarItemText: { fontSize: 14, fontWeight: '600', color: '#64748b', marginLeft: 8 },
   sidebarFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 10, borderTopWidth: 1, borderTopColor: '#f1f5f9' },
-  footerRow: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', alignItems: 'center', paddingHorizontal: 10 },
   settingsBtn: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   settingsText: { fontSize: 14, fontWeight: '600', color: '#64748b' },
   logoutBtn: { padding: 8, backgroundColor: '#fef2f2', borderRadius: 8 },
@@ -305,7 +353,6 @@ const styles = StyleSheet.create({
   /* Header */
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 16, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#1e293b' },
-  menuButton: { padding: 4 },
 
   /* Content */
   scrollContent: { flex: 1, backgroundColor: '#fff' },
@@ -338,4 +385,10 @@ const styles = StyleSheet.create({
   bottomNav: { flexDirection: 'row', backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#e2e8f0', paddingVertical: 10, paddingBottom: Platform.OS === 'ios' ? 25 : 10, justifyContent: 'space-around', alignItems: 'center', elevation: 10 },
   navItem: { alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20 },
   navLabel: { fontSize: 10, fontWeight: '600', color: '#94a3b8', marginTop: 4 },
+
+  /* Empty States */
+  emptyCard: { backgroundColor: '#f8fafc', padding: 20, borderRadius: 12, alignItems: 'center', borderStyle: 'dashed', borderWidth: 1, borderColor: '#cbd5e1' },
+  emptyText: { color: '#94a3b8', fontSize: 13, fontWeight: '500' },
+  helpEmpty: { backgroundColor: '#f0fdf4', padding: 12, borderRadius: 8, alignItems: 'center', borderWidth: 1, borderColor: '#bcf0da' },
+  helpEmptyText: { color: '#16a34a', fontSize: 12, fontWeight: 'bold' },
 });

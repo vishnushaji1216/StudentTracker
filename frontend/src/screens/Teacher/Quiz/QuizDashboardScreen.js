@@ -193,12 +193,15 @@ export default function QuizDashboardScreen({ navigation }) {
             </TouchableOpacity>
           )}
   
-          {/* Show submissions for completed quizzes */}
+          {/* Show Analytics button for completed quizzes */}
           {isCompleted && (
-            <View style={styles.actionBtn}>
-              <FontAwesome5 name="users" size={12} color="#64748b" />
-              <Text style={styles.actionText}>{item.submittedCount || 0} Submissions</Text>
-            </View>
+            <TouchableOpacity 
+              style={[styles.actionBtn, { backgroundColor: '#eef2ff', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 }]} 
+              onPress={() => navigation.navigate('QuizResult', { quizId: item._id, quizTitle: item.title })}
+            >
+              <FontAwesome5 name="chart-bar" size={12} color="#4f46e5" />
+              <Text style={[styles.actionText, { color: '#4f46e5' }]}>View Analytics</Text>
+            </TouchableOpacity>
           )}
         </View>
       </Animated.View>
