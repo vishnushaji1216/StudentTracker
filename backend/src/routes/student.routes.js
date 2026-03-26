@@ -11,7 +11,8 @@ import {
   getAvailableQuizzes,
   getQuizForStudent,
   submitQuiz,
-  getQuizResult
+  getQuizResult,
+  getBehaviorLogs
 } from "../controllers/student.controller.js";
 import auth from "../middleware/auth.middleware.js";
 
@@ -63,5 +64,7 @@ router.get("/quizzes", auth, studentCheck, getAvailableQuizzes); // List of quiz
 router.get("/quiz/:id", auth, studentCheck, getQuizForStudent); // Start specific quiz
 router.post("/quiz/submit", auth, studentCheck, submitQuiz); // Submit answers
 router.get("/quiz/:quizId/result", auth, studentCheck, getQuizResult);
+router.get("/behavior", auth, studentCheck, getBehaviorLogs);
+
 
 export default router;

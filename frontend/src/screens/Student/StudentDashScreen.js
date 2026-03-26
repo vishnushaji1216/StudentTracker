@@ -36,7 +36,8 @@ export default function StudentDashScreen({ navigation }) {
     hasSiblings: false,
     dailyMission: null,
     pendingList: [],
-    feedback: []
+    feedback: [],
+    behavior: []
   });
 
   // --- STATE: Toast ---
@@ -155,8 +156,9 @@ export default function StudentDashScreen({ navigation }) {
       );
   }
 
-  const { student, hasSiblings, dailyMission, pendingList } = dashboardData;
-  const recentFeedback = dashboardData.feedback.filter(item => isRecent(item.updatedAt));
+  const { student, hasSiblings, dailyMission, pendingList, feedback, behavior } = dashboardData;
+  const recentFeedback = feedback.filter(item => isRecent(item.updatedAt)); 
+  const recentBehavior = behavior || [];
 
   return (
     <View style={styles.container}>
@@ -321,7 +323,7 @@ export default function StudentDashScreen({ navigation }) {
               )}
             </View>
 
-            {/* RECENT FEEDBACK */}
+            {/* RECENT FEEDBACK (TASK BASED) */}
             {recentFeedback.length > 0 && (
                 <View style={styles.sectionMb}>
                 <Text style={styles.sectionTitle}>TEACHER FEEDBACK (LAST 2 DAYS)</Text>
@@ -330,11 +332,15 @@ export default function StudentDashScreen({ navigation }) {
                         <View style={styles.feedbackHeader}>
                             <View style={styles.feedbackLeft}>
                                 <View style={[styles.iconBox, { backgroundColor: '#faf5ff' }]}>
-                                    <FontAwesome5 name={item.type === 'Handwriting' ? 'pen-fancy' : 'comment'} size={12} color="#9333ea" />
+                                    <FontAwesome5 name={item.type === 'handwriting' ? 'pen-fancy' : 'comment'} size={12} color="#9333ea" />
                                 </View>
-                                <Text style={styles.feedbackCategory}>{item.type || 'Review'}</Text>
+                                <Text style={styles.feedbackCategory}>
+                                    {item.subject ? `${item.subject} ${item.type || ''}` : (item.type || 'Review')}
+                                </Text>
                             </View>
-                            <Text style={styles.feedbackDate}>Recent</Text>
+                            <Text style={styles.feedbackDate}>
+                                {new Date(item.updatedAt).toLocaleDateString()}
+                            </Text>
                         </View>
                         
                         <View style={styles.starRow}>
@@ -344,13 +350,47 @@ export default function StudentDashScreen({ navigation }) {
                                 ))}
                             </View>
                             <Text style={styles.goodWorkText}>
-                                {item.obtainedMarks >= 4 ? "Good Work!" : "Keep Improving"}
+                                {item.obtainedMarks >= 4 ? "Good Work!" : item.obtainedMarks >= 3 ? "Keep it up" : "Needs Practice"}
                             </Text>
                         </View>
 
                         {item.feedback ? <Text style={styles.commentText}>"{item.feedback}"</Text> : null}
+                        {item.assignment?.title && <Text style={styles.taskSource}>Ref: {item.assignment.title}</Text>}
                     </View>
                 ))}
+                </View>
+            )}
+
+            {/* BEHAVIOR LOGS (NEW) */}
+            {recentBehavior.length > 0 && (
+                <View style={styles.sectionMb}>
+                    <Text style={[styles.sectionTitle, { color: '#f59e0b' }]}>BEHAVIOR & REMARKS</Text>
+                    {recentBehavior.map((log) => (
+                        <View key={log._id} style={[styles.feedbackCard, { borderLeftWidth: 4, borderLeftColor: '#f59e0b' }]}>
+                            <View style={styles.feedbackHeader}>
+                                <View style={styles.feedbackLeft}>
+                                    <View style={[styles.iconBox, { backgroundColor: '#fff7ed' }]}>
+                                        <FontAwesome5 name="award" size={12} color="#f59e0b" />
+                                    </View>
+                                    <Text style={styles.feedbackCategory}>{log.title}</Text>
+                                </View>
+                                <Text style={styles.feedbackDate}>
+                                    {new Date(log.timestamp).toLocaleDateString()}
+                                </Text>
+                            </View>
+
+                            <View style={styles.starRow}>
+                                <View style={styles.stars}>
+                                    {[1, 2, 3, 4, 5].map((s) => (
+                                        <FontAwesome5 key={s} name="star" solid={s <= log.rating} size={12} color={s <= log.rating ? "#fbbf24" : "#cbd5e1"} />
+                                    ))}
+                                </View>
+                                <Text style={styles.goodWorkText}>By {log.teacher?.name || 'Teacher'}</Text>
+                            </View>
+
+                            {log.comment ? <Text style={styles.commentText}>"{log.comment}"</Text> : null}
+                        </View>
+                    ))}
                 </View>
             )}
 
@@ -454,6 +494,7 @@ const styles = StyleSheet.create({
   stars: { flexDirection: 'row', gap: 2 },
   goodWorkText: { fontSize: 12, fontWeight: 'bold', color: '#334155' },
   commentText: { fontSize: 12, color: '#64748b', fontStyle: 'italic', paddingLeft: 32 },
+  taskSource: { fontSize: 9, color: '#94a3b8', paddingLeft: 32, marginTop: 4, textTransform: 'uppercase' },
 
   /* Empty State */
   emptyState: { padding: 30, alignItems: 'center', backgroundColor: '#fff', borderRadius: 16, borderStyle: 'dashed', borderWidth: 1, borderColor: '#cbd5e1' },

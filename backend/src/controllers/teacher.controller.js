@@ -5,6 +5,7 @@ import Assignment from "../models/assignment.model.js";
 import Announcement from "../models/announcement.model.js";
 import Submission from "../models/submission.model.js"; 
 import Quiz from "../models/quiz.model.js";
+import BehaviorLog from "../models/behavior.model.js";
 import sharp from "sharp";
 import mongoose from "mongoose";
 

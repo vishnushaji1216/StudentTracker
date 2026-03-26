@@ -14,7 +14,10 @@ import {
   UIManager,
   Linking,
   ActivityIndicator,
-  Alert
+  RefreshControl,
+  Alert,
+  Modal,
+  TextInput
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import FontAwesome5 from "react-native-vector-icons/FontAwesome5";
@@ -37,8 +40,15 @@ export default function TStudentDetailScreen({ navigation, route }) {
   const [loading, setLoading] = useState(true);
   const [student, setStudent] = useState(null);
   const [subjects, setSubjects] = useState([]);
-  const [ranking, setRanking] = useState(null); // State for Rank Data
+  const [ranking, setRanking] = useState(null); 
   const [expandedId, setExpandedId] = useState(null); 
+
+  // Behavior Modal State
+  const [showBehaviorModal, setShowBehaviorModal] = useState(false);
+  const [behaviorTitle, setBehaviorTitle] = useState("");
+  const [behaviorComment, setBehaviorComment] = useState("");
+  const [behaviorRating, setBehaviorRating] = useState(5);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // --- FETCH DATA ---
   useEffect(() => {
@@ -84,6 +94,32 @@ export default function TStudentDetailScreen({ navigation, route }) {
         Linking.openURL(`tel:${student.mobile}`);
     } else {
         Alert.alert("No Number", "Parent contact number not found.");
+    }
+  };
+
+  const handleSubmitBehavior = async () => {
+    if (!behaviorTitle.trim()) {
+      Alert.alert("Error", "Behavior type cannot be empty.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      await api.post(`/teacher/student/${studentId}/behavior`, {
+        title: behaviorTitle,
+        comment: behaviorComment,
+        rating: behaviorRating,
+      });
+      Alert.alert("Success", "Behavior logged successfully!");
+      setShowBehaviorModal(false);
+      setBehaviorTitle("");
+      setBehaviorComment("");
+      setBehaviorRating(5); // Reset to default
+    } catch (error) {
+      console.error("Submit Behavior Error:", error);
+      Alert.alert("Error", "Failed to log behavior. Please try again.");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -280,7 +316,10 @@ export default function TStudentDetailScreen({ navigation, route }) {
                   <Text style={styles.actionBtnText}>Call Parent</Text>
                </TouchableOpacity>
                
-               <TouchableOpacity style={[styles.actionBtn, styles.actionBtnOrange]}>
+               <TouchableOpacity 
+                 style={[styles.actionBtn, styles.actionBtnOrange]}
+                 onPress={() => setShowBehaviorModal(true)}
+               >
                   <FontAwesome5 name="star" size={14} color="#fff" />
                   <Text style={styles.actionBtnText}>Log Behavior</Text>
                </TouchableOpacity>
@@ -288,6 +327,81 @@ export default function TStudentDetailScreen({ navigation, route }) {
           </View>
 
         </ScrollView>
+
+        {/* --- BEHAVIOR MODAL --- */}
+        <Modal
+          visible={showBehaviorModal}
+          transparent={true}
+          animationType="slide"
+          onRequestClose={() => setShowBehaviorModal(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContainer}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Log Student Behavior</Text>
+                <TouchableOpacity onPress={() => setShowBehaviorModal(false)}>
+                  <FontAwesome5 name="times" size={20} color="#94a3b8" />
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView style={styles.modalBody}>
+                <Text style={styles.fieldLabel}>BEHAVIOR TYPE</Text>
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="e.g. Excellent Participation, Disruptive"
+                  value={behaviorTitle}
+                  onChangeText={setBehaviorTitle}
+                />
+
+                <Text style={styles.fieldLabel}>RATING (1-5 STARS)</Text>
+                <View style={styles.starContainer}>
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <TouchableOpacity key={star} onPress={() => setBehaviorRating(star)}>
+                      <FontAwesome5 
+                        name="star" 
+                        solid={star <= behaviorRating} 
+                        size={28} 
+                        color={star <= behaviorRating ? "#fbbf24" : "#e2e8f0"} 
+                        style={{ marginHorizontal: 6 }}
+                      />
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                <Text style={styles.fieldLabel}>OPTIONAL COMMENT</Text>
+                <TextInput
+                  style={[styles.textInput, styles.textArea]}
+                  placeholder="Add specific details..."
+                  value={behaviorComment}
+                  onChangeText={setBehaviorComment}
+                  multiline={true}
+                  numberOfLines={4}
+                />
+              </ScrollView>
+
+              <View style={styles.modalFooter}>
+                <TouchableOpacity 
+                  style={styles.cancelBtn} 
+                  onPress={() => setShowBehaviorModal(false)}
+                  disabled={isSubmitting}
+                >
+                  <Text style={styles.cancelBtnText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={[styles.submitBtn, (!behaviorTitle || isSubmitting) && styles.disabledBtn]} 
+                  onPress={handleSubmitBehavior}
+                  disabled={!behaviorTitle || isSubmitting}
+                >
+                  {isSubmitting ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Text style={styles.submitBtnText}>Save Log</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
 
         {/* FIXED BOTTOM NAVIGATION */}
         <View style={styles.bottomNav}>
@@ -472,4 +586,21 @@ const styles = StyleSheet.create({
   bottomNav: { flexDirection: 'row', backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#e2e8f0', paddingVertical: 10, paddingBottom: Platform.OS === 'ios' ? 25 : 10, justifyContent: 'space-around', alignItems: 'center', elevation: 10 },
   navItem: { alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20 },
   navLabel: { fontSize: 10, fontWeight: '600', color: '#94a3b8', marginTop: 4 },
-});
+
+  /* Modal Styles */
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  modalContainer: { backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingBottom: 40, maxHeight: '85%' },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
+  modalTitle: { fontSize: 18, fontWeight: 'bold', color: '#1e293b' },
+  modalBody: { padding: 20 },
+  fieldLabel: { fontSize: 11, fontWeight: 'bold', color: '#94a3b8', marginBottom: 8, marginTop: 16 },
+  textInput: { backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 12, padding: 12, fontSize: 14, color: '#1e293b' },
+  textArea: { height: 100, textAlignVertical: 'top' },
+  starContainer: { flexDirection: 'row', justifyContent: 'center', marginVertical: 10 },
+  modalFooter: { flexDirection: 'row', gap: 12, padding: 20, borderTopWidth: 1, borderTopColor: '#f1f5f9' },
+  cancelBtn: { flex: 1, paddingVertical: 14, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: '#e2e8f0' },
+  cancelBtnText: { color: '#64748b', fontWeight: 'bold' },
+  submitBtn: { flex: 1, backgroundColor: '#4f46e5', paddingVertical: 14, borderRadius: 12, alignItems: 'center' },
+  submitBtnText: { color: '#fff', fontWeight: 'bold' },
+  disabledBtn: { backgroundColor: '#a5b4fc' },
+});

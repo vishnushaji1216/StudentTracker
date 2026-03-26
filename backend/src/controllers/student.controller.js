@@ -4,6 +4,7 @@ import Submission from "../models/submission.model.js";
 import Quiz from "../models/quiz.model.js"; 
 import Teacher from "../models/teacher.model.js";
 import Announcement from "../models/announcement.model.js";
+import BehaviorLog from "../models/behavior.model.js";
 import fs from 'fs';
 import { uploadFileToSupabase } from "../services/supabase.js";
 
@@ -46,14 +47,19 @@ export const getStudentDashboard = async (req, res) => {
 
     const dailyMission = pendingTasks.length > 0 ? pendingTasks[0] : null;
 
-    // 4. Feedback Logic
+    // 4. Feedback Logic (Combined Submissions + Behavior Logs)
     const recentFeedback = await Submission.find({ 
       student: studentId, 
-      status: 'Graded' 
+      status: 'graded' // use lowercase 'graded' as per latest convention
     })
     .sort({ updatedAt: -1 })
-    .limit(5)
+    .limit(10) // Increased limit
     .populate('assignment', 'title subject');
+
+    const recentBehavior = await BehaviorLog.find({ student: studentId })
+      .sort({ timestamp: -1 })
+      .limit(10)
+      .populate('teacher', 'name');
 
     // 5. RESPONSE
     res.json({
@@ -62,8 +68,6 @@ export const getStudentDashboard = async (req, res) => {
         className: student.className,
         rollNo: student.rollNo,
         initials: student.name.substring(0, 2).toUpperCase(),
-        
-        // --- CRITICAL ADDITIONS FOR LOCK SCREEN ---
         isFeeLocked: student.isFeeLocked, 
         fees: student.fees 
       },
@@ -82,7 +86,8 @@ export const getStudentDashboard = async (req, res) => {
         type: t.type,
         endsIn: "Due " + new Date(t.dueDate).toLocaleDateString()
       })),
-      feedback: recentFeedback
+      feedback: recentFeedback,
+      behavior: recentBehavior // New Field
     });
 
   } catch (error) {
@@ -613,6 +618,21 @@ export const getQuizForStudent = async (req, res) => {
   } catch (error) {
     console.error("Quiz Load Error:", error);
     res.status(500).json({ message: "Error loading quiz" });
+  }
+};
+
+// --- BEHAVIOR LOGS ---
+export const getBehaviorLogs = async (req, res) => {
+  try {
+    const studentId = req.user.id;
+    const logs = await BehaviorLog.find({ student: studentId })
+      .populate('teacher', 'name')
+      .sort({ timestamp: -1 });
+
+    res.json(logs);
+  } catch (error) {
+    console.error("Get Behavior Logs Error:", error);
+    res.status(500).json({ message: "Failed to fetch behavior logs" });
   }
 };
 

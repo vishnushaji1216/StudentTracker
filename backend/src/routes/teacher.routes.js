@@ -19,6 +19,7 @@ import {
   getTeacherSubjects,
   getTeacherDashboardStats,
   getStudentReport,
+  logBehavior,
   getClassSubjects,
   getMyClassDefaulters,
   getQuizAnalytics
@@ -66,6 +67,8 @@ router.get("/class-subjects", auth, teacherCheck, getClassSubjects);
 
 router.get("/students", auth, teacherCheck, getDirectory); 
 router.get("/student/:studentId/report", auth, teacherCheck, getStudentReport);
+router.post("/student/:studentId/behavior", auth, teacherCheck, logBehavior);
+
 
 /* =====================================================
    SHARED DATA 
