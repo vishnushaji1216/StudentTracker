@@ -24,7 +24,7 @@ import {
   getFeeDashboardStats
 } from '../controllers/fee.controller.js';
 
-import { manualHandwritingReset } from '../utils/handwritingResetCron.js';
+import { manualCleanupAll } from '../utils/submissionCron.js';
 
 import Submission from '../models/submission.model.js';
 
@@ -84,20 +84,13 @@ router.get('/reset-handwriting', async (req, res) => {
   try {
     console.log('🔧 Manual handwriting reset triggered...');
     
-    const result = await manualHandwritingReset();
+    const result = await manualCleanupAll('handwriting');
     
-    if (result.success) {
-      res.json({
-        success: true,
-        message: result.message,
-        count: result.count
-      });
-    } else {
-      res.status(500).json({
-        success: false,
-        message: result.message
-      });
-    }
+    res.json({
+      success: true,
+      message: 'Weekly handwriting cleanup processed',
+      count: result.handwriting
+    });
 
   } catch (error) {
     console.error('❌ Admin reset error:', error);
@@ -170,14 +163,6 @@ router.get('/reset-handwriting-force', async (req, res) => {
   }
 });
 
-// 3. NORMAL RESET (only resets if >7 days old)
-router.get('/reset-handwriting', async (req, res) => {
-  try {
-    const result = await manualHandwritingReset();
-    res.json(result);
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
+// Route was consolidated above
 
 export default router;

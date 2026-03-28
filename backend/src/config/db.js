@@ -1,11 +1,11 @@
 import mongoose from "mongoose";
-import { startHandwritingResetCron } from "../utils/handwritingResetCron.js";
+import { startSubmissionCleanupCron } from "../utils/submissionCron.js";
 
 const connectDB = async () => {
   try {
     await mongoose.connect(process.env.MONGO_URI);
     console.log("MongoDB Connected");
-    startHandwritingResetCron();
+    startSubmissionCleanupCron();
     console.log("cron");
   } catch (err) {
     console.error("DB Error:", err.message);

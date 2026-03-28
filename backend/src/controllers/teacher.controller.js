@@ -12,7 +12,7 @@ import mongoose from "mongoose";
 // --- 1. GET TEACHER'S CLASSES & PROFILE ---
 export const getTeacherProfile = async (req, res) => {
   try {
-    const teacher = await Teacher.findById(req.user.id).select('name teacherCode classTeachership');
+    const teacher = await Teacher.findById(req.user.id).select('name teacherCode classTeachership profilePic');
     
     if (!teacher) {
       return res.status(404).json({ message: "Teacher not found" });
@@ -118,7 +118,8 @@ export const getMyClasses = async (req, res) => {
       profile: {
         name: teacher.name,
         teacherCode: teacher.teacherCode,
-        classTeachership: teacher.classTeachership
+        classTeachership: teacher.classTeachership,
+        profilePic: teacher.profilePic
       },
       summary: {
         totalStudents,
@@ -671,6 +672,8 @@ console.log('End Time (dueDate):', endAt.toISOString());
 console.log('Current Server Time:', new Date().toISOString());
 console.log('Time difference (minutes):', (endAt - startAt) / 60000);
 
+    const studentCount = await Student.countDocuments({ className });
+
     const newAssignment = new Assignment({
       teacher: teacherId,
       quizId: savedQuiz._id,
@@ -683,7 +686,8 @@ console.log('Time difference (minutes):', (endAt - startAt) / 60000);
       dueDate: endAt,
       duration: safeDuration,
       passingScore: Number(passingScore) || 40,
-      totalMarks: calculatedTotal
+      totalMarks: calculatedTotal,
+      assignedCount: studentCount
     });
 
     await newAssignment.save();
@@ -1125,7 +1129,15 @@ export const getQuizAnalytics = async (req, res) => {
       .populate('student', 'name rollNo profilePic')
       .sort({ obtainedMarks: -1 });
 
-    const totalStudents = assignment.assignedCount || 0;
+    let totalStudents = assignment.assignedCount || 0;
+    
+    // Fallback: If assignedCount is 0 (old data), count current class students
+    if (totalStudents === 0) {
+        totalStudents = await Student.countDocuments({ className: assignment.className });
+        // Optionally update the assignment so it's correct next time
+        assignment.assignedCount = totalStudents;
+        await assignment.save();
+    }
     const submittedCount = submissions.length;
     const totalMarks = assignment.totalMarks || 100;
 
@@ -1177,5 +1189,36 @@ export const getQuizAnalytics = async (req, res) => {
   } catch (error) {
     console.error("Quiz Analytics Error:", error);
     res.status(500).json({ message: "Failed to load analytics" });
+  }
+};
+
+// --- 8. BEHAVIOR LOGGING ---
+export const logBehavior = async (req, res) => {
+  try {
+    const { studentId } = req.params;
+    const { title, comment, rating } = req.body;
+    const teacherId = req.user.id;
+
+    if (!title || !rating) {
+      return res.status(400).json({ message: "Title and rating are required" });
+    }
+
+    const newLog = new BehaviorLog({
+      student: studentId,
+      teacher: teacherId,
+      title,
+      comment,
+      rating: Number(rating)
+    });
+
+    await newLog.save();
+
+    res.status(201).json({ 
+      message: "Behavior logged successfully", 
+      log: newLog 
+    });
+  } catch (error) {
+    console.error("Log Behavior Error:", error);
+    res.status(500).json({ message: "Failed to log behavior", error: error.message });
   }
 };

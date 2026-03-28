@@ -34,16 +34,27 @@ export const getStudentDashboard = async (req, res) => {
     // 3. Assignments Logic
     const allAssignments = await Assignment.find({ 
       className: student.className,
-      status: { $in: ['Scheduled', 'Active'] } ,
-      dueDate: { $gte: now}
+      status: { $in: ['Scheduled', 'Active'] }
     }).sort({ dueDate: 1 });
 
     const mySubmissions = await Submission.find({ student: studentId });
-    const submittedAssignmentIds = mySubmissions.map(s => s.assignment?.toString());
+    // Track truly finished assignments (submitted or graded)
+    const completedAssignmentIds = mySubmissions
+        .filter(s => ['submitted', 'graded', 'graded'].includes(s.status.toLowerCase()))
+        .map(s => s.assignment?.toString());
 
-    const pendingTasks = allAssignments.filter(a => 
-      !submittedAssignmentIds.includes(a._id.toString())
-    );
+    const pendingTasks = allAssignments.filter(a => {
+        // 1. Hide if already submitted/graded
+        if (completedAssignmentIds.includes(a._id.toString())) return false;
+
+        // 2. Hide quizzes that have strictly expired
+        const isExpired = a.dueDate && new Date(a.dueDate) < now;
+        if (a.type === 'quiz' && isExpired) return false;
+
+        // 3. Show Audio and Homework until they are removed from DB by TTL (helps with late submissions)
+        // or Quizzes that haven't expired yet
+        return true;
+    });
 
     const dailyMission = pendingTasks.length > 0 ? pendingTasks[0] : null;
 

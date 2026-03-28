@@ -98,9 +98,7 @@ export default function TeacherSidebar({ isOpen, onClose, navigation, activeItem
               <View style={styles.profileRow}>
                 <Image
                   source={{
-                    uri:
-                      "https://ui-avatars.com/api/?background=eef2ff&color=4f46e5&name=" +
-                      profile.name,
+                    uri: profile.profilePic || "https://i.pravatar.cc/150?u=" + (profile.teacherCode || "teacher"),
                   }}
                   style={styles.profilePic}
                 />

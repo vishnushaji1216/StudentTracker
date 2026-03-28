@@ -1,6 +1,7 @@
 import Submission from "../models/submission.model.js";
 import Student from "../models/student.model.js";
 import Teacher from "../models/teacher.model.js";
+import Assignment from "../models/assignment.model.js";
 import { deleteFileFromSupabase, uploadFileToSupabase } from "../services/supabase.js";
 import sharp from "sharp";
 

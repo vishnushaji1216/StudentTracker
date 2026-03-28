@@ -78,7 +78,7 @@ export default function AudioReviewScreen({ navigation }) {
   const fetchQueue = async () => {
     try {
       setLoading(true);
-      const response = await api.get('/queue/audio');
+      const response = await api.get('/teacher/queue/audio');
       // Backend returns array of { id, name, fileUrl, title, ... }
       setQueue(response.data);
     } catch (error) {
@@ -98,7 +98,7 @@ export default function AudioReviewScreen({ navigation }) {
 
     setSubmitting(true);
     try {
-      await api.post('/log/audio', {
+      await api.post('/teacher/log/audio', {
         submissionId: item.submissionId,
         rating,
         tags: selectedTags,
